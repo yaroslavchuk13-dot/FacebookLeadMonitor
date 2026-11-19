@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Lead Monitor",
+  "version": "0.1.0",
+  "description": "Reads selected Facebook groups and sends new posts to the local Lead Monitor app.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "action": {
+    "default_title": "Facebook Lead Monitor",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Facebook Lead Monitor</title>
+  <style>
+    body { width: 360px; margin: 0; padding: 12px; font: 13px/1.4 system-ui, sans-serif; color: #1c1e21; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    label { display: block; font-weight: 600; margin: 10px 0 4px; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 6px; font: inherit;
+                      border: 1px solid #ccd0d5; border-radius: 6px; }
+    textarea { height: 120px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    .hint { color: #65676b; font-size: 12px; margin-top: 2px; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 7px; font: inherit; border: 0; border-radius: 6px; cursor: pointer;
+             background: #e4e6eb; }
+    button.primary { background: #1877f2; color: #fff; }
+    #status { margin-top: 10px; min-height: 18px; white-space: pre-line; }
+    .ok { color: #1a7f37; } .error { color: #c62828; }
+  </style>
+</head>
+<body>
+  <h1>Facebook Lead Monitor</h1>
+
+  <label for="token">Токен (EXTENSION_TOKEN з .env)</label>
+  <input id="token" type="password" autocomplete="off">
+
+  <label for="port">Порт локального сервера</label>
+  <input id="port" type="number" min="1024" max="65535">
+
+  <label for="groups">Групи для моніторингу</label>
+  <textarea id="groups" placeholder="https://www.facebook.com/groups/123456789/"></textarea>
+  <div class="hint">Одне посилання на рядок. Ви маєте бути учасником цих груп.</div>
+
+  <div class="row">
+    <button id="save" class="primary">Зберегти</button>
+    <button id="check">Перевірити з'єднання</button>
+  </div>
+  <div id="status"></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
