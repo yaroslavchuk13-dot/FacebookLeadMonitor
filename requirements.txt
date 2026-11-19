@@ -1,0 +1,7 @@
+# Data validation and settings
+pydantic==2.14.4
+pydantic-settings==2.16.3
+python-dotenv==1.2.4
+
+# Tests
+pytest==9.2.0
