@@ -1,0 +1,17 @@
+# Virtual environment
+.venv/
+
+# Secrets (tokens, passwords)
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local database and logs
+data/
+logs/
+
+# Visual Studio service files
+.vs/
