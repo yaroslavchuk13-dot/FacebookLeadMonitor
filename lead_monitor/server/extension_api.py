@@ -1,21 +1,20 @@
 """Local HTTP server that receives posts from the Chrome extension.
 
 Listens only on 127.0.0.1. Every /api/* request must carry the shared token
-in the X-Extension-Token header. Run: `python extension_server.py`.
+in the X-Extension-Token header. Run: `python -m lead_monitor.server`.
 """
 
 import hmac
 import json
 import logging
-import sys
 from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 from pydantic import ValidationError
 
-from app_logging import setup_logging
-from config import get_settings
-from models import FacebookPost
+from lead_monitor.core.config import get_settings
+from lead_monitor.core.log_setup import setup_logging
+from lead_monitor.core.models import FacebookPost
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +103,3 @@ def main() -> int:
     log.info("Extension server listening on http://%s:%d", HOST, settings.extension_port)
     web.run_app(app, host=HOST, port=settings.extension_port, print=None, access_log=None)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

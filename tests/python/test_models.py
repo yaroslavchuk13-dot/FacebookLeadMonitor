@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from models import FacebookPost, ScamCheckResult, ScamLevel
+from lead_monitor.core.models import FacebookPost, ScamCheckResult, ScamLevel
 
 POST_URL = "https://www.facebook.com/groups/123/posts/456/"
 PROFILE_URL = "https://www.facebook.com/profile.php?id=789"

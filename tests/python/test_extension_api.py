@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from extension_server import MAX_POSTS_PER_REQUEST, TOKEN_HEADER, create_app
-from models import FacebookPost
+from lead_monitor.server.extension_api import MAX_POSTS_PER_REQUEST, TOKEN_HEADER, create_app
+from lead_monitor.core.models import FacebookPost
 
 TOKEN = "test-token-123"
 AUTH = {TOKEN_HEADER: TOKEN}

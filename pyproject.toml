@@ -1,0 +1,8 @@
+# Project tool settings. Dependencies are listed in requirements.txt.
+
+[tool.pytest.ini_options]
+# Python tests live in tests/python, the lead_monitor package is imported from the project root.
+testpaths = ["tests/python"]
+pythonpath = ["."]
+# -p no:cacheprovider: do not create the .pytest_cache folder.
+addopts = "-ra -p no:cacheprovider"

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { groupFeedUrl, parseGroupId, parseGroupList } from "../../extension/groups.js";
+import { groupFeedUrl, parseGroupId, parseGroupList } from "../../extension/lib/groups.js";
 
 test("parses numeric and slug group ids", () => {
   assert.equal(parseGroupId("https://www.facebook.com/groups/123456789/"), "123456789");

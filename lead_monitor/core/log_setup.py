@@ -1,7 +1,7 @@
 """Logging setup: console + rotating file, with secrets masked everywhere.
 
 Usage (once, at program start):
-    from app_logging import setup_logging
+    from lead_monitor.core.log_setup import setup_logging
     setup_logging()
     log = logging.getLogger(__name__)
 """
@@ -10,7 +10,7 @@ import logging
 import re
 from logging.handlers import RotatingFileHandler
 
-from config import Settings, get_settings
+from lead_monitor.core.config import Settings, get_settings
 
 LOG_FILE_NAME = "app.log"
 MAX_BYTES = 1_000_000  # 1 MB per file
@@ -101,7 +101,7 @@ def setup_logging(settings: Settings | None = None) -> None:
 
 if __name__ == "__main__":
     setup_logging()
-    log = logging.getLogger("app_logging.demo")
+    log = logging.getLogger("lead_monitor.demo")
     log.info("Logging works. File: %s", get_settings().log_dir / LOG_FILE_NAME)
     log.info("Fake URL: https://api.telegram.org/bot123456789:AAFakeTokenForMaskingTest_1234567890/sendMessage")
     log.info("Fake key: %s", "sk-proj-FAKEfakeFAKEfake1234")

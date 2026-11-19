@@ -1,6 +1,6 @@
 """Application settings loaded from environment variables and the .env file.
 
-Run `python config.py` to print the current settings (secrets are hidden).
+Run `python -m lead_monitor.core.config` to print the current settings (secrets are hidden).
 """
 
 from functools import lru_cache
@@ -10,8 +10,8 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Project root: the folder that contains this file.
-BASE_DIR = Path(__file__).resolve().parent
+# Project root: FacebookLeadMonitor/ (lead_monitor/core/config.py -> up 2 levels).
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):

@@ -1,5 +1,5 @@
 // Settings popup: token, server port, list of groups.
-import { parseGroupList } from "./groups.js";
+import { parseGroupList } from "../lib/groups.js";
 
 const DEFAULT_SETTINGS = { token: "", port: 8765, groupIds: [] };
 const REQUEST_TIMEOUT_MS = 3000;
@@ -61,7 +61,7 @@ async function onCheck() {
     if (!auth.ok) throw new Error(`HTTP ${auth.status}`);
     showStatus("З'єднання є, токен правильний ✓", "ok");
   } catch (err) {
-    showStatus(`Сервер недоступний (${err.message}).\nЗапустіть: python extension_server.py`, "error");
+    showStatus(`Сервер недоступний (${err.message}).\nЗапустіть: python -m lead_monitor.server`, "error");
   }
 }
 

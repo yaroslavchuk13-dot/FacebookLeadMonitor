@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from config import BASE_DIR, Settings
+from lead_monitor.core.config import BASE_DIR, Settings
 
 ENV_NAMES = [
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "AI_PROVIDER", "OLLAMA_BASE_URL",

@@ -1,12 +1,12 @@
-"""Tests for app_logging: secret masking, file output, rotation."""
+"""Tests for lead_monitor.core.log_setup: secret masking, file output, rotation."""
 
 import logging
 from pathlib import Path
 
 import pytest
 
-import app_logging
-from config import Settings
+from lead_monitor.core import log_setup
+from lead_monitor.core.config import Settings
 
 FAKE_TG_TOKEN = "123456789:AAFakeTokenForMaskingTest_1234567890"
 FAKE_EXT_TOKEN = "myCustomExtSecret42"
@@ -20,7 +20,7 @@ def log_dir(tmp_path: Path):
     settings = Settings(
         _env_file=None, log_dir=tmp_path, log_level="DEBUG", extension_token=FAKE_EXT_TOKEN
     )
-    app_logging.setup_logging(settings)
+    log_setup.setup_logging(settings)
     yield tmp_path
     for handler in root.handlers[:]:
         root.removeHandler(handler)
@@ -32,7 +32,7 @@ def log_dir(tmp_path: Path):
 def read_log(folder: Path) -> str:
     for handler in logging.getLogger().handlers:
         handler.flush()
-    return (folder / app_logging.LOG_FILE_NAME).read_text(encoding="utf-8")
+    return (folder / log_setup.LOG_FILE_NAME).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ def test_secrets_masked_in_file(log_dir: Path, message: str, secret: str) -> Non
     logging.getLogger("t").info(message)
     text = read_log(log_dir)
     assert secret not in text
-    assert app_logging.MASK in text
+    assert log_setup.MASK in text
 
 
 def test_secret_in_args_masked(log_dir: Path) -> None:
@@ -74,16 +74,16 @@ def test_normal_text_not_changed(log_dir: Path) -> None:
 
 def test_repeated_setup_does_not_duplicate(log_dir: Path) -> None:
     settings = Settings(_env_file=None, log_dir=log_dir)
-    app_logging.setup_logging(settings)
+    log_setup.setup_logging(settings)
     logging.getLogger("t").info("only once")
     assert read_log(log_dir).count("only once") == 1
 
 
 def test_rotation(log_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app_logging, "MAX_BYTES", 2000)
-    app_logging.setup_logging(Settings(_env_file=None, log_dir=log_dir))
+    monkeypatch.setattr(log_setup, "MAX_BYTES", 2000)
+    log_setup.setup_logging(Settings(_env_file=None, log_dir=log_dir))
     for i in range(200):
         logging.getLogger("t").info("line %d %s", i, "x" * 50)
     files = sorted(p.name for p in log_dir.iterdir())
     assert "app.log.1" in files
-    assert len(files) == app_logging.BACKUP_COUNT + 1
+    assert len(files) == log_setup.BACKUP_COUNT + 1
