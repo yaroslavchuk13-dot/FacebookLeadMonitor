@@ -18,7 +18,8 @@ FacebookLeadMonitor/
 ├── extension/                 Chrome-розширення (Manifest V3)
 │   ├── manifest.json
 │   ├── popup/                 вікно налаштувань (токен, порт, групи)
-│   └── lib/                   спільні JS-функції
+│   ├── content/               код, що працює на сторінці групи (розбір дописів)
+│   └── lib/                   спільні JS-функції для popup і фонової частини
 ├── tests/
 │   ├── python/                тести pytest
 │   └── js/                    тести node --test

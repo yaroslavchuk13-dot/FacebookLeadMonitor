@@ -1,5 +1,9 @@
 // Settings popup: token, server port, list of groups.
-import { parseGroupList } from "../lib/groups.js";
+import { parseGroupId, parseGroupList } from "../lib/groups.js";
+
+const CONTENT_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
+const PREVIEW_POSTS = 5;
+const PREVIEW_TEXT_LENGTH = 120;
 
 const DEFAULT_SETTINGS = { token: "", port: 8765, groupIds: [] };
 const REQUEST_TIMEOUT_MS = 3000;
@@ -77,4 +81,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   fillForm(await loadSettings());
   $("save").addEventListener("click", onSave);
   $("check").addEventListener("click", onCheck);
+  $("parse-tab").addEventListener("click", onParseTab);
 });
+
+/** Test helper: parse posts in the active tab and show a preview. Sends nothing. */
+async function onParseTab() {
+  const preview = $("preview");
+  preview.textContent = "";
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || parseGroupId(tab.url) === null) {
+    return showStatus("Відкрийте сторінку Facebook-групи в поточній вкладці.", "error");
+  }
+  showStatus("Розбираю сторінку…");
+  try {
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: CONTENT_SCRIPTS });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target,
+      func: () => globalThis.FLM.parseFeed(),
+    });
+    if (result.status !== "ok") {
+      return showStatus(`Стрічку не знайдено (${result.status}). Прокрутіть сторінку і спробуйте ще.`, "error");
+    }
+    showStatus(
+      `Група: ${result.groupName ?? result.groupId}\nДописів: ${result.posts.length}, пропущено: ${result.skipped}`,
+      result.posts.length ? "ok" : "error",
+    );
+    preview.textContent = result.posts
+      .slice(0, PREVIEW_POSTS)
+      .map((p) => {
+        const author = p.author_name ?? "(анонімно)";
+        const profile = p.author_profile_url ? "" : " [без профілю]";
+        const text = p.text.replace(/\s+/g, " ").slice(0, PREVIEW_TEXT_LENGTH);
+        return `👤 ${author}${profile}\n${text}\n🔗 ${p.post_url}`;
+      })
+      .join("\n\n");
+  } catch (err) {
+    showStatus(`Помилка розбору: ${err.message}`, "error");
+  }
+}
