@@ -1,25 +1,78 @@
-// Settings popup: token, server port, list of groups.
+// Popup: monitor control and status, settings, parsing test.
 import { parseGroupId, parseGroupList } from "../lib/groups.js";
+import { loadMonitor, loadOutbox, loadSettings, saveSettings } from "../lib/storage.js";
 
-const CONTENT_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
+const TEST_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
 const PREVIEW_POSTS = 5;
 const PREVIEW_TEXT_LENGTH = 120;
-
-const DEFAULT_SETTINGS = { token: "", port: 8765, groupIds: [] };
 const REQUEST_TIMEOUT_MS = 3000;
+
+const STATUS_TEXT = {
+  ok: "ok",
+  no_feed: "стрічку не знайдено",
+  not_group: "це не сторінка групи",
+  checkpoint: "checkpoint",
+  login_required: "потрібен вхід",
+  error: "помилка",
+};
 
 const $ = (id) => document.getElementById(id);
 
-function showStatus(text, kind = "") {
-  const el = $("status");
+function showMessage(id, text, kind = "") {
+  const el = $(id);
   el.textContent = text;
-  el.className = kind;
+  el.className = `message ${kind}`;
 }
 
-async function loadSettings() {
-  const { settings } = await chrome.storage.local.get("settings");
-  return { ...DEFAULT_SETTINGS, ...settings };
+const formatTime = (ms) => new Date(ms).toLocaleTimeString("uk-UA");
+
+// --- monitor ---------------------------------------------------------------------------
+
+let currentMonitor = null;
+let outboxSize = 0;
+
+function renderMonitor() {
+  const m = currentMonitor;
+  if (!m) return;
+  const state = $("monitor-state");
+  state.textContent = m.running ? "● Працює" : "○ Зупинено";
+  state.className = `state ${m.running ? "running" : "stopped"}`;
+  $("start").disabled = m.running;
+  $("stop").disabled = !m.running;
+
+  const lines = [];
+  if (m.lastRun) {
+    const r = m.lastRun;
+    lines.push(`Остання група: ${r.groupId} о ${formatTime(r.at)}`);
+    lines.push(`Результат: ${STATUS_TEXT[r.status] ?? r.status}, знайдено ${r.found}, надіслано ${r.sent}`);
+    if (r.error) lines.push(`⚠ ${r.error}`);
+  }
+  if (m.running && m.nextRunAt) {
+    const sec = Math.max(0, Math.round((m.nextRunAt - Date.now()) / 1000));
+    lines.push(sec > 0 ? `Наступна перевірка через ${sec} с` : "Перевіряю групу…");
+  }
+  lines.push(`Усього надіслано: ${m.postsSent}`);
+  if (outboxSize) lines.push(`Чекають відправки (сервер недоступний): ${outboxSize}`);
+  $("monitor-details").textContent = lines.join("\n");
+
+  $("monitor-alert").textContent = m.alert
+    ? `⛔ ${m.alert.message}\n(${formatTime(m.alert.at)})`
+    : "";
 }
+
+async function refreshMonitor() {
+  currentMonitor = await loadMonitor();
+  outboxSize = (await loadOutbox()).length;
+  renderMonitor();
+}
+
+async function sendCommand(type) {
+  showMessage("monitor-message", "");
+  const response = await chrome.runtime.sendMessage({ type });
+  if (!response?.ok) showMessage("monitor-message", response?.error ?? "Невідома помилка", "error");
+}
+
+// --- settings --------------------------------------------------------------------------
 
 function readForm() {
   const token = $("token").value.trim();
@@ -37,19 +90,25 @@ function readForm() {
   return { settings: { token, port, groupIds }, errors };
 }
 
+function fillForm(settings) {
+  $("token").value = settings.token;
+  $("port").value = settings.port;
+  $("groups").value = settings.groupIds.map((id) => `https://www.facebook.com/groups/${id}/`).join("\n");
+}
+
 async function onSave() {
   const { settings, errors } = readForm();
-  if (errors.length) return showStatus(errors.join("\n"), "error");
-  await chrome.storage.local.set({ settings });
+  if (errors.length) return showMessage("status", errors.join("\n"), "error");
+  await saveSettings(settings);
   fillForm(settings); // show the normalized list
-  showStatus(`Збережено. Груп: ${settings.groupIds.length}.`, "ok");
+  showMessage("status", `Збережено. Груп: ${settings.groupIds.length}.`, "ok");
 }
 
 async function onCheck() {
   const { settings, errors } = readForm();
-  if (errors.length) return showStatus(errors.join("\n"), "error");
+  if (errors.length) return showMessage("status", errors.join("\n"), "error");
   const base = `http://127.0.0.1:${settings.port}`;
-  showStatus("Перевіряю…");
+  showMessage("status", "Перевіряю…");
   try {
     const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!health.ok) throw new Error(`HTTP ${health.status}`);
@@ -61,62 +120,65 @@ async function onCheck() {
       body: JSON.stringify({ posts: [] }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (auth.status === 401) return showStatus("Сервер працює, але токен невірний.", "error");
+    if (auth.status === 401) return showMessage("status", "Сервер працює, але токен невірний.", "error");
     if (!auth.ok) throw new Error(`HTTP ${auth.status}`);
-    showStatus("З'єднання є, токен правильний ✓", "ok");
+    showMessage("status", "З'єднання є, токен правильний ✓", "ok");
   } catch (err) {
-    showStatus(`Сервер недоступний (${err.message}).\nЗапустіть: python -m lead_monitor.server`, "error");
+    showMessage("status", `Сервер недоступний (${err.message}).\nЗапустіть: python -m lead_monitor.server`, "error");
   }
 }
 
-function fillForm(settings) {
-  $("token").value = settings.token;
-  $("port").value = settings.port;
-  $("groups").value = settings.groupIds
-    .map((id) => `https://www.facebook.com/groups/${id}/`)
-    .join("\n");
-}
+// --- parsing test ----------------------------------------------------------------------
 
-document.addEventListener("DOMContentLoaded", async () => {
-  fillForm(await loadSettings());
-  $("save").addEventListener("click", onSave);
-  $("check").addEventListener("click", onCheck);
-  $("parse-tab").addEventListener("click", onParseTab);
-});
-
-/** Test helper: parse posts in the active tab and show a preview. Sends nothing. */
 async function onParseTab() {
   const preview = $("preview");
   preview.textContent = "";
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || parseGroupId(tab.url) === null) {
-    return showStatus("Відкрийте сторінку Facebook-групи в поточній вкладці.", "error");
+    return showMessage("status", "Відкрийте сторінку Facebook-групи в поточній вкладці.", "error");
   }
-  showStatus("Розбираю сторінку…");
+  preview.textContent = "Розбираю сторінку…";
   try {
     const target = { tabId: tab.id };
-    await chrome.scripting.executeScript({ target, files: CONTENT_SCRIPTS });
+    await chrome.scripting.executeScript({ target, files: TEST_SCRIPTS });
     const [{ result }] = await chrome.scripting.executeScript({
       target,
       func: () => globalThis.FLM.parseFeed(),
     });
     if (result.status !== "ok") {
-      return showStatus(`Стрічку не знайдено (${result.status}). Прокрутіть сторінку і спробуйте ще.`, "error");
+      preview.textContent = `Стрічку не знайдено (${result.status}). Прокрутіть сторінку і спробуйте ще.`;
+      return;
     }
-    showStatus(
-      `Група: ${result.groupName ?? result.groupId}\nДописів: ${result.posts.length}, пропущено: ${result.skipped}`,
-      result.posts.length ? "ok" : "error",
-    );
-    preview.textContent = result.posts
-      .slice(0, PREVIEW_POSTS)
-      .map((p) => {
-        const author = p.author_name ?? "(анонімно)";
-        const profile = p.author_profile_url ? "" : " [без профілю]";
-        const text = p.text.replace(/\s+/g, " ").slice(0, PREVIEW_TEXT_LENGTH);
-        return `👤 ${author}${profile}\n${text}\n🔗 ${p.post_url}`;
-      })
-      .join("\n\n");
+    const header = `Група: ${result.groupName ?? result.groupId}\nДописів: ${result.posts.length}, пропущено: ${result.skipped}`;
+    const posts = result.posts.slice(0, PREVIEW_POSTS).map((p) => {
+      const author = p.author_name ?? "(анонімно)";
+      const profile = p.author_profile_url ? "" : " [без профілю]";
+      const text = p.text.replace(/\s+/g, " ").slice(0, PREVIEW_TEXT_LENGTH);
+      return `👤 ${author}${profile}\n${text}\n🔗 ${p.post_url}`;
+    });
+    preview.textContent = [header, ...posts].join("\n\n");
   } catch (err) {
-    showStatus(`Помилка розбору: ${err.message}`, "error");
+    preview.textContent = `Помилка розбору: ${err.message}`;
   }
 }
+
+// --- init ------------------------------------------------------------------------------
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const settings = await loadSettings();
+  fillForm(settings);
+  // Open settings automatically until the extension is configured.
+  $("settings-section").open = !settings.token || !settings.groupIds.length;
+
+  $("start").addEventListener("click", () => sendCommand("monitor:start"));
+  $("stop").addEventListener("click", () => sendCommand("monitor:stop"));
+  $("save").addEventListener("click", onSave);
+  $("check").addEventListener("click", onCheck);
+  $("parse-tab").addEventListener("click", onParseTab);
+
+  await refreshMonitor();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && (changes.monitor || changes.outbox)) refreshMonitor();
+  });
+  setInterval(renderMonitor, 1000); // countdown to the next visit
+});

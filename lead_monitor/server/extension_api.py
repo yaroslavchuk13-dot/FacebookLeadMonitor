@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from lead_monitor.core.config import get_settings
 from lead_monitor.core.log_setup import setup_logging
-from lead_monitor.core.models import FacebookPost
+from lead_monitor.core.models import ExtensionAlert, FacebookPost
 
 log = logging.getLogger(__name__)
 
@@ -24,9 +24,11 @@ MAX_POSTS_PER_REQUEST = 100
 MAX_BODY_BYTES = 2_000_000
 
 PostSink = Callable[[list[FacebookPost]], Awaitable[None]]
+AlertSink = Callable[[ExtensionAlert], Awaitable[None]]
 
 TOKEN_KEY = web.AppKey("token", str)
 SINK_KEY = web.AppKey("sink", PostSink)
+ALERT_SINK_KEY = web.AppKey("alert_sink", AlertSink)
 
 
 async def log_sink(posts: list[FacebookPost]) -> None:
@@ -34,6 +36,14 @@ async def log_sink(posts: list[FacebookPost]) -> None:
     for post in posts:
         preview = post.text[:80].replace("\n", " ")
         log.info("Post | group=%s | %s | %s", post.group_id, post.post_url, preview)
+
+
+async def log_alert_sink(alert: ExtensionAlert) -> None:
+    """Temporary alert sink: log only. M3 also sends alerts to Telegram."""
+    log.warning(
+        "ALERT from extension | %s | group=%s | stopped=%s | %s",
+        alert.kind, alert.group_id, alert.stopped, alert.message,
+    )
 
 
 @web.middleware
@@ -82,14 +92,27 @@ async def receive_posts(request: web.Request) -> web.Response:
     return web.json_response({"accepted": len(accepted), "rejected": rejected})
 
 
-def create_app(token: str, sink: PostSink = log_sink) -> web.Application:
+async def receive_alert(request: web.Request) -> web.Response:
+    try:
+        alert = ExtensionAlert.model_validate(await request.json())
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError):
+        return web.json_response({"error": "invalid alert"}, status=400)
+    await request.app[ALERT_SINK_KEY](alert)
+    return web.json_response({"ok": True})
+
+
+def create_app(
+    token: str, sink: PostSink = log_sink, alert_sink: AlertSink = log_alert_sink
+) -> web.Application:
     if not token:
         raise ValueError("Extension token must not be empty")
     app = web.Application(middlewares=[auth_middleware], client_max_size=MAX_BODY_BYTES)
     app[TOKEN_KEY] = token
     app[SINK_KEY] = sink
+    app[ALERT_SINK_KEY] = alert_sink
     app.router.add_get("/health", health)
     app.router.add_post("/api/posts", receive_posts)
+    app.router.add_post("/api/alert", receive_alert)
     return app
 
 

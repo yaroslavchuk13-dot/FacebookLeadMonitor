@@ -1,0 +1,31 @@
+body { width: 360px; margin: 0; padding: 12px; font: 13px/1.4 system-ui, sans-serif; color: #1c1e21; }
+h1 { font-size: 15px; margin: 0 0 10px; }
+label { display: block; font-weight: 600; margin: 10px 0 4px; }
+input, textarea { box-sizing: border-box; width: 100%; padding: 6px; font: inherit;
+                  border: 1px solid #ccd0d5; border-radius: 6px; }
+textarea { height: 110px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.hint { color: #65676b; font-size: 12px; margin-top: 2px; }
+.row { display: flex; gap: 8px; margin-top: 10px; }
+button { flex: 1; padding: 7px; font: inherit; border: 0; border-radius: 6px; cursor: pointer; background: #e4e6eb; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #1877f2; color: #fff; }
+button.danger { background: #c62828; color: #fff; }
+.ok { color: #1a7f37; } .error { color: #c62828; }
+.message { margin-top: 8px; min-height: 18px; white-space: pre-line; }
+
+/* Monitor card */
+.card { background: #f0f2f5; border-radius: 8px; padding: 8px 10px; }
+.state { font-weight: 600; }
+.state.running { color: #1a7f37; }
+.state.stopped { color: #65676b; }
+.details { margin-top: 4px; white-space: pre-line; color: #1c1e21; }
+.alert { margin-top: 8px; padding: 8px; border-radius: 6px; background: #fdecea; color: #8a1c1c;
+         white-space: pre-line; }
+.alert:empty { display: none; }
+
+/* Collapsible sections */
+details { margin-top: 12px; border-top: 1px solid #e4e6eb; padding-top: 8px; }
+summary { cursor: pointer; font-weight: 600; }
+#preview { margin: 8px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap;
+           font: 12px/1.35 ui-monospace, Consolas, monospace; background: #f0f2f5; border-radius: 6px; padding: 6px; }
+#preview:empty { display: none; }

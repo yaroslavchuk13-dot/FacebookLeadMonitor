@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -73,3 +74,18 @@ class ScamCheckResult(BaseModel):
     red_flags: list[str] = Field(default_factory=list)
     green_flags: list[str] = Field(default_factory=list)
     checked_at: datetime = Field(default_factory=_utc_now)
+
+
+AlertKind = Literal["checkpoint", "login_required", "no_feed", "error"]
+
+
+class ExtensionAlert(BaseModel):
+    """A problem reported by the Chrome extension (e.g. Facebook asked for a checkpoint)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True, extra="ignore")
+
+    kind: AlertKind
+    message: str = Field(min_length=1, max_length=500)
+    group_id: str | None = None
+    stopped: bool = False  # True if the extension stopped monitoring because of it
+    created_at: datetime = Field(default_factory=_utc_now)

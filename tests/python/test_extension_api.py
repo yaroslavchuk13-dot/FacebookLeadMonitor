@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from lead_monitor.core.models import ExtensionAlert, FacebookPost
 from lead_monitor.server.extension_api import MAX_POSTS_PER_REQUEST, TOKEN_HEADER, create_app
-from lead_monitor.core.models import FacebookPost
 
 TOKEN = "test-token-123"
 AUTH = {TOKEN_HEADER: TOKEN}
@@ -101,3 +101,50 @@ def test_invalid_json() -> None:
 
     status, _ = call(fn)
     assert status == 400
+
+
+# --- /api/alert ---------------------------------------------------------------
+
+
+def send_alert(body: Any, headers: dict[str, str] = AUTH) -> tuple[int, list[ExtensionAlert]]:
+    """POST `body` to /api/alert; return the status and the alerts the sink received."""
+    alerts: list[ExtensionAlert] = []
+
+    async def alert_sink(alert: ExtensionAlert) -> None:
+        alerts.append(alert)
+
+    async def runner() -> int:
+        app = create_app(TOKEN, alert_sink=alert_sink)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post("/api/alert", json=body, headers=headers)
+            return resp.status
+
+    return asyncio.run(runner()), alerts
+
+
+def test_alert_accepted() -> None:
+    body = {"kind": "checkpoint", "message": "Facebook checkpoint", "group_id": "1", "stopped": True}
+    status, alerts = send_alert(body)
+    assert status == 200
+    assert len(alerts) == 1
+    assert alerts[0].kind == "checkpoint" and alerts[0].stopped is True
+
+
+def test_alert_requires_token() -> None:
+    status, alerts = send_alert({"kind": "error", "message": "x"}, headers={})
+    assert status == 401 and alerts == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"kind": "unknown", "message": "x"},
+        {"kind": "error", "message": ""},
+        {"kind": "error", "message": "x" * 501},
+        {"message": "no kind"},
+        ["not", "an", "object"],
+    ],
+)
+def test_invalid_alert_rejected(body: Any) -> None:
+    status, alerts = send_alert(body)
+    assert status == 400 and alerts == []
