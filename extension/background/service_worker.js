@@ -1,13 +1,26 @@
 // Background service worker: wires Chrome events to the monitor.
-import { ALARM_NAME, resumeIfRunning, runTick, startMonitor, stopMonitor } from "./monitor.js";
+import {
+  ALARM_NAME,
+  resumeIfRunning,
+  runTick,
+  startMonitor,
+  stopMonitor,
+  watchdog,
+  WATCHDOG_ALARM,
+} from "./monitor.js";
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) runTick();
+  if (alarm.name === WATCHDOG_ALARM) watchdog();
 });
 
-chrome.runtime.onStartup.addListener(() => {
-  resumeIfRunning();
-});
+// Every service worker start (browser start, extension reload or update):
+// make sure a running monitor keeps going.
+resumeIfRunning();
+// These listeners make Chrome start the service worker on browser start / extension
+// update even if no alarm survived; the call above then does the work.
+chrome.runtime.onStartup.addListener(() => {});
+chrome.runtime.onInstalled.addListener(() => {});
 
 // Messages from the popup: { type: "monitor:start" | "monitor:stop" }.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

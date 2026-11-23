@@ -13,6 +13,9 @@
   const CLICK_PAUSE_MIN_MS = 250; // human-like pause between button clicks
   const CLICK_PAUSE_MAX_MS = 600;
   const AFTER_CLICKS_WAIT_MS = 800; // let Facebook re-render the expanded text
+  const SCROLL_SCREENS = 2; // Facebook loads more posts only while the page is scrolled
+  const SCROLL_PAUSE_MIN_MS = 1200;
+  const SCROLL_PAUSE_MAX_MS = 2000;
 
   const { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton } =
     globalThis.FLM.postLinks;
@@ -98,6 +101,15 @@
     return cleanText(parts.join("\n")).slice(0, MAX_TEXT_LENGTH);
   }
 
+  /** Scrolls down a couple of screens so Facebook loads more posts, then back to the top. */
+  async function loadMorePosts() {
+    for (let i = 0; i < SCROLL_SCREENS; i += 1) {
+      window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" });
+      await sleep(randomBetween(SCROLL_PAUSE_MIN_MS, SCROLL_PAUSE_MAX_MS));
+    }
+    window.scrollTo({ top: 0 });
+  }
+
   /**
    * Clicks the buttons accepted by `isTarget` inside posts (not in comments).
    * Returns how many were clicked.
@@ -136,6 +148,7 @@
     const feed = document.querySelector(FEED);
     if (!feed) return { status: "no_feed", groupId, groupName: groupName(), posts: [], skipped: 0 };
 
+    await loadMorePosts();
     const elements = postElements(feed);
     const expanded = await expandPosts(elements);
     const missingUrl = elements.filter((el) => !findPostUrl(el, groupId));

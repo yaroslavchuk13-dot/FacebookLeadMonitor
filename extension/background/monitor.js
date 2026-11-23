@@ -12,6 +12,9 @@ import {
 import { sendAlert, sendPosts } from "./server_api.js";
 
 export const ALARM_NAME = "monitor-tick";
+// Restarts the loop if Chrome dropped the tick alarm (extension reload, service worker restart).
+export const WATCHDOG_ALARM = "monitor-watchdog";
+const WATCHDOG_PERIOD_MIN = 1;
 
 const CONTENT_SCRIPTS = ["content/post_links.js", "content/page_state.js", "content/feed_parser.js"];
 // Waits inside one visit (tests set them to 0).
@@ -40,16 +43,35 @@ export async function startMonitor() {
   if (!settings.token) return { ok: false, error: "Спершу вкажіть і збережіть токен." };
   if (!settings.groupIds.length) return { ok: false, error: "Спершу додайте і збережіть групи." };
 
-  await updateMonitor({ running: true, alert: null, groupFailures: {} });
+  await updateMonitor({ running: true, alert: null, groupFailures: {}, currentVisit: null });
   await setBadge("ON", "#1a7f37");
+  await chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: WATCHDOG_PERIOD_MIN });
   runTick(); // first visit right away, do not wait for it
   return { ok: true };
 }
 
 export async function stopMonitor(alert = null) {
   await chrome.alarms.clear(ALARM_NAME);
-  await updateMonitor({ running: false, nextRunAt: null, ...(alert ? { alert } : {}) });
+  await chrome.alarms.clear(WATCHDOG_ALARM);
+  await updateMonitor({
+    running: false,
+    nextRunAt: null,
+    currentVisit: null,
+    ...(alert ? { alert } : {}),
+  });
   await setBadge(alert ? "!" : "", "#c62828");
+}
+
+/**
+ * Runs every minute while monitoring. If no visit is in progress and no next visit
+ * is scheduled, the loop was lost (service worker restart) — start the next visit now.
+ */
+export async function watchdog() {
+  const monitor = await loadMonitor();
+  if (!monitor.running || busy) return;
+  if (await chrome.alarms.get(ALARM_NAME)) return;
+  console.warn("Monitor loop was lost — restarting it");
+  runTick();
 }
 
 /** Entry point for the alarm and for "start". Never throws. */
@@ -60,19 +82,24 @@ export async function runTick() {
     await tick();
   } catch (err) {
     console.error("Monitor tick failed", err);
+    await updateMonitor({ currentVisit: null });
     await scheduleNext(); // keep going after unexpected errors
   } finally {
     busy = false;
   }
 }
 
-/** Called when the browser starts: resume monitoring if it was running. */
+/**
+ * Called whenever the service worker starts (browser start, extension reload/update):
+ * if monitoring was running, make sure the watchdog is there — it resumes the loop.
+ */
 export async function resumeIfRunning() {
   const monitor = await loadMonitor();
   if (!monitor.running) return;
   await setBadge("ON", "#1a7f37");
-  const alarm = await chrome.alarms.get(ALARM_NAME);
-  if (!alarm) await scheduleNext();
+  if (!(await chrome.alarms.get(WATCHDOG_ALARM))) {
+    await chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: WATCHDOG_PERIOD_MIN });
+  }
 }
 
 // --- one tick ------------------------------------------------------------------------
@@ -88,6 +115,7 @@ async function tick() {
 
   const index = nextGroupIndex(settings.groupIds.length, monitor.lastIndex);
   const groupId = settings.groupIds[index];
+  await updateMonitor({ currentVisit: { groupId, startedAt: Date.now() }, nextRunAt: null });
   const visit = await visitGroup(groupId, monitor.tabId);
 
   monitor = await loadMonitor();
@@ -95,7 +123,12 @@ async function tick() {
 
   if (STOP_STATES.has(visit.status)) {
     const alert = { kind: visit.status, message: STOP_MESSAGES[visit.status], at: Date.now() };
-    await updateMonitor({ tabId: visit.tabId, lastIndex: index, lastRun: runInfo(groupId, visit) });
+    await updateMonitor({
+      tabId: visit.tabId,
+      lastIndex: index,
+      currentVisit: null,
+      lastRun: runInfo(groupId, visit),
+    });
     await sendAlert(settings, { kind: alert.kind, message: alert.message, group_id: groupId, stopped: true });
     await stopMonitor(alert);
     return;
@@ -120,6 +153,7 @@ async function tick() {
     tabId: visit.tabId,
     lastIndex: index,
     groupFailures: failures,
+    currentVisit: null,
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),
   });
@@ -129,6 +163,7 @@ async function tick() {
 function runInfo(groupId, visit, delivery = { sent: 0, error: null }) {
   return {
     groupId,
+    groupName: visit.groupName ?? null,
     at: Date.now(),
     status: visit.status,
     found: visit.posts?.length ?? 0,

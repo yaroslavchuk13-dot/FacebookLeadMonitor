@@ -74,7 +74,16 @@ globalThis.fetch = async (url, init) => {
   return { ok: true, status: 200, json: async () => json };
 };
 
-const { ALARM_NAME, runTick, startMonitor, stopMonitor, timing } = await import(
+const {
+  ALARM_NAME,
+  resumeIfRunning,
+  runTick,
+  startMonitor,
+  stopMonitor,
+  timing,
+  watchdog,
+  WATCHDOG_ALARM,
+} = await import(
   "../../extension/background/monitor.js"
 );
 Object.assign(timing, { renderWaitMinMs: 0, renderWaitMaxMs: 0, emptyFeedRetryMs: 0 });
@@ -208,4 +217,55 @@ test("stop clears the alarm and nothing runs afterwards", async () => {
   assert.equal(fake.alarms.has(ALARM_NAME), false);
   await runTick();
   assert.deepEqual(fake.navigations, []);
+});
+
+// --- watchdog / recovery -----------------------------------------------------------------
+
+const waitFor = async (check) => {
+  for (let i = 0; i < 100 && !check(); i += 1) await new Promise((r) => setTimeout(r, 5));
+};
+
+test("start creates the watchdog, stop removes it", async () => {
+  fake.store.monitor = { running: false };
+  assert.equal((await startMonitor()).ok, true);
+  assert.ok(fake.alarms.get(WATCHDOG_ALARM).periodInMinutes > 0);
+  await waitFor(() => fake.alarms.has(ALARM_NAME)); // first visit finished
+  await stopMonitor();
+  assert.equal(fake.alarms.has(WATCHDOG_ALARM), false);
+  assert.equal(monitor().currentVisit, null);
+});
+
+test("watchdog restarts a lost loop (no tick alarm)", async () => {
+  await watchdog();
+  await waitFor(() => fake.alarms.has(ALARM_NAME));
+  assert.equal(fake.navigations.length, 1);
+  assert.equal(monitor().currentVisit, null);
+  assert.ok(monitor().nextRunAt > Date.now());
+});
+
+test("watchdog does nothing while the next visit is scheduled", async () => {
+  fake.alarms.set(ALARM_NAME, { delayInMinutes: 1 });
+  await watchdog();
+  assert.deepEqual(fake.navigations, []);
+});
+
+test("watchdog does nothing when monitoring is stopped", async () => {
+  fake.store.monitor = { running: false };
+  await watchdog();
+  assert.deepEqual(fake.navigations, []);
+});
+
+test("service worker restart re-creates the watchdog for a running monitor", async () => {
+  await resumeIfRunning();
+  assert.ok(fake.alarms.has(WATCHDOG_ALARM));
+  fake.store.monitor = { running: false };
+  fake.alarms.clear();
+  await resumeIfRunning();
+  assert.equal(fake.alarms.has(WATCHDOG_ALARM), false);
+});
+
+test("last run keeps the group name for the popup", async () => {
+  fake.pageResult = { ...okPage(), groupName: "Firestoppers UK Work" };
+  await runTick();
+  assert.equal(monitor().lastRun.groupName, "Firestoppers UK Work");
 });
