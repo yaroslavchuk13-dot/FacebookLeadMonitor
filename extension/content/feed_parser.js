@@ -143,13 +143,12 @@
 
     const posts = [];
     const seen = new Set();
-    const skippedDetails = [];
+    let skipped = 0; // ads, loading placeholders, photo-only posts, repeats
     for (const el of elements) {
       const postUrl = findPostUrl(el, groupId);
       const text = findText(el);
-      const reason = skipReason(postUrl, text, seen);
-      if (reason) {
-        skippedDetails.push(describeSkipped(el, reason));
+      if (!postUrl || !text || seen.has(postUrl)) {
+        skipped += 1;
         continue;
       }
       seen.add(postUrl);
@@ -163,41 +162,8 @@
         text,
       });
     }
-    return {
-      status: "ok",
-      groupId,
-      groupName: groupName(),
-      posts,
-      skipped: skippedDetails.length,
-      skippedDetails, // for the popup test only, never sent to the server
-      expanded, // how many "See original" / "See more" buttons were clicked
-    };
-  }
-
-  function skipReason(postUrl, text, seen) {
-    if (!postUrl && !text) return "no_link_no_text";
-    if (!postUrl) return "no_link";
-    if (!text) return "no_text";
-    if (seen.has(postUrl)) return "duplicate";
-    return null;
-  }
-
-  /** Short description of a skipped block, to understand what the parser missed. */
-  function describeSkipped(el, reason) {
-    const preview = cleanText(el.innerText).replace(/\s+/g, " ").slice(0, 80);
-    // Link paths (without query) show which link formats Facebook used.
-    const links = own(el, "a[href]")
-      .map((a) => {
-        const href = a.getAttribute("href");
-        try {
-          return href === "#" ? "#" : new URL(href, location.origin).pathname;
-        } catch {
-          return href;
-        }
-      })
-      .filter((p, i, all) => all.indexOf(p) === i)
-      .slice(0, 4);
-    return { reason, preview, links };
+    // expanded: how many "See original" / "See more" buttons were clicked.
+    return { status: "ok", groupId, groupName: groupName(), posts, skipped, expanded };
   }
 
   globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { parseFeed });

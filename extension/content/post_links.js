@@ -75,6 +75,8 @@
 
   // Button labels in the Facebook UI (English / Ukrainian / Russian).
   const SEE_MORE_WORDS = ["See more", "Детальніше", "Показати більше", "Більше", "Ещё", "Еще", "Читать дальше"];
+  // Shown at the end of an expanded post; must never be clicked, only removed from text.
+  const SEE_LESS_WORDS = ["See less", "Показати менше", "Згорнути", "Показать меньше", "Свернуть"];
   const SEE_ORIGINAL_WORDS = ["See original", "Показати оригінал", "Переглянути оригінал", "Показать оригинал"];
   const TRANSLATION_FOOTER_WORDS = [
     ...SEE_ORIGINAL_WORDS,
@@ -88,8 +90,9 @@
   const SEE_MORE_BUTTON_RE = exactWordsRe(SEE_MORE_WORDS);
   const SEE_ORIGINAL_BUTTON_RE = exactWordsRe(SEE_ORIGINAL_WORDS);
 
-  // "See more" text glued to the end of a truncated post.
-  const SEE_MORE_RE = new RegExp(`(?:…|\\.\\.\\.)?\\s*(?:${SEE_MORE_WORDS.map(escapeRe).join("|")})\\s*$`, "i");
+  // "See more" / "See less" text glued to the end of a post.
+  const TOGGLE_WORDS = [...SEE_MORE_WORDS, ...SEE_LESS_WORDS];
+  const SEE_MORE_RE = new RegExp(`(?:…|\\.\\.\\.)?\\s*(?:${TOGGLE_WORDS.map(escapeRe).join("|")})\\s*$`, "i");
   // A line made only of translation controls: "Показать оригинал · Оцените этот перевод".
   const TRANSLATION_LINE_RE = new RegExp(
     `^(?:\\s*(?:${TRANSLATION_FOOTER_WORDS.map(escapeRe).join("|")})\\s*[·•]?)+$`,

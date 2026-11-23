@@ -3,8 +3,6 @@ import { parseGroupId, parseGroupList } from "../lib/groups.js";
 import { loadMonitor, loadOutbox, loadSettings, saveSettings } from "../lib/storage.js";
 
 const TEST_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
-const PREVIEW_POSTS = 5;
-const PREVIEW_TEXT_LENGTH = 120;
 const REQUEST_TIMEOUT_MS = 3000;
 
 const STATUS_TEXT = {
@@ -14,13 +12,6 @@ const STATUS_TEXT = {
   checkpoint: "checkpoint",
   login_required: "потрібен вхід",
   error: "помилка",
-};
-
-const SKIP_REASONS = {
-  no_link_no_text: "немає ні посилання, ні тексту (реклама / заглушка?)",
-  no_link: "не знайдено посилання на допис",
-  no_text: "немає тексту (лише фото / відео?)",
-  duplicate: "повтор",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -156,23 +147,14 @@ async function onParseTab() {
       preview.textContent = `Стрічку не знайдено (${result.status}). Прокрутіть сторінку і спробуйте ще.`;
       return;
     }
-    const exp = result.expanded ?? { originals: 0, seeMore: 0 };
-    const header =
-      `Група: ${result.groupName ?? result.groupId}\n` +
-      `Дописів: ${result.posts.length}, пропущено: ${result.skipped}\n` +
-      `Розгорнуто «Ещё»: ${exp.seeMore}, показано оригінал замість перекладу: ${exp.originals}`;
-    const posts = result.posts.slice(0, PREVIEW_POSTS).map((p) => {
+    const header = `Група: ${result.groupName ?? result.groupId}\nДописів: ${result.posts.length}`;
+    // Full text exactly as it will be sent to the server, with its length.
+    const posts = result.posts.map((p, i) => {
       const author = p.author_name ?? "(анонімно)";
       const profile = p.author_profile_url ? "" : " [без профілю]";
-      const text = p.text.replace(/\s+/g, " ").slice(0, PREVIEW_TEXT_LENGTH);
-      return `👤 ${author}${profile}\n${text}\n🔗 ${p.post_url}`;
+      return `── ${i + 1}. 👤 ${author}${profile} (${p.text.length} символів) ──\n${p.text}\n🔗 ${p.post_url}`;
     });
-    const skipped = (result.skippedDetails ?? []).map((s, i) => {
-      const links = s.links.length ? `\n   посилання: ${s.links.join("  ")}` : "";
-      return `${i + 1}. ${SKIP_REASONS[s.reason] ?? s.reason}\n   «${s.preview || "порожній блок"}»${links}`;
-    });
-    const skippedBlock = skipped.length ? [`── Пропущено (${skipped.length}) ──`, ...skipped] : [];
-    preview.textContent = [header, ...posts, ...skippedBlock].join("\n\n");
+    preview.textContent = [header, ...posts].join("\n\n");
   } catch (err) {
     preview.textContent = `Помилка розбору: ${err.message}`;
   }

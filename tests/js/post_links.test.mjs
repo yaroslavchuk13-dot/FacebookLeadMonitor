@@ -99,3 +99,13 @@ test("translation controls are removed from text", () => {
   // A normal sentence that merely contains the words is kept.
   assert.equal(cleanText("Please see original drawings"), "Please see original drawings");
 });
+
+test("'see less' is removed from expanded text and never treated as 'see more'", () => {
+  const { isSeeMoreButton } = globalThis.FLM.postLinks;
+  assert.equal(cleanText("Or 07700000000\nThank you! Показать меньше"), "Or 07700000000\nThank you!");
+  assert.equal(cleanText("Thank you! See less"), "Thank you!");
+  assert.equal(cleanText("Дякую! Згорнути"), "Дякую!");
+  for (const label of ["See less", "Показать меньше", "Згорнути"]) {
+    assert.equal(isSeeMoreButton(label), false, label);
+  }
+});
