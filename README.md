@@ -20,6 +20,8 @@ FacebookLeadMonitor/
 │   ├── popup/                 вікно налаштувань (токен, порт, групи)
 │   ├── content/               код, що працює на сторінці групи (розбір дописів)
 │   └── lib/                   спільні JS-функції для popup і фонової частини
+├── scripts/
+│   └── setup.ps1              встановлення на новому ПК
 ├── tests/
 │   ├── python/                тести pytest
 │   └── js/                    тести node --test
@@ -34,14 +36,23 @@ FacebookLeadMonitor/
 
 Не потрапляють у Git: `.env` (секрети), `data/` (база), `logs/` (логи), `.venv/`.
 
-## Встановлення
+## Встановлення (на новому ПК)
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env   # і заповнити значення
-```
+1. Встановити **Python 3.12+** з https://www.python.org/downloads/ (галочка «Add python.exe to PATH»)
+   і **Git** з https://git-scm.com/.
+2. Отримати код: `git clone <адреса репозиторію> C:\FacebookLeadMonitor`
+   (або у Visual Studio: **Git → Clone Repository**).
+3. Запустити скрипт — він створить `.venv`, встановить залежності, створить `.env` і прожене тести:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File C:\FacebookLeadMonitor\scripts\setup.ps1
+   ```
+4. Заповнити `.env` (токени Git не переносить — скопіюйте старий `.env` або створіть нові).
+5. Завантажити розширення в Chrome (розділ нижче) і вставити токен у popup.
+
+**Що Git НЕ переносить:** `.env` (секрети), `data/` (база з історією лідів — скопіюйте папку вручну,
+якщо потрібна історія), `logs/`, `.venv/` (створюється скриптом), розширення в Chrome (завантажується заново).
+
+Відкрити у Visual Studio: **File → Open → Folder…** → `C:\FacebookLeadMonitor`.
 
 ## Команди
 
