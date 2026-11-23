@@ -1,4 +1,4 @@
-# Starts the local server (uses the project's .venv, no activation needed).
+# Starts the program: server for the extension + Telegram bot (uses .venv, no activation needed).
 # Run:  powershell -ExecutionPolicy Bypass -File C:\FacebookLeadMonitor\scripts\start_server.ps1
 # Stop: Ctrl+C in this window.
 
@@ -11,5 +11,5 @@ if (-not (Test-Path $python)) {
     exit 1
 }
 
-& $python -m lead_monitor.server
+& $python -m lead_monitor
 exit $LASTEXITCODE

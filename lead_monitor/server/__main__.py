@@ -1,7 +1,7 @@
-"""Entry point: `python -m lead_monitor.server`."""
+"""Kept for compatibility: `python -m lead_monitor.server` starts the whole program."""
 
 import sys
 
-from lead_monitor.server.extension_api import main
+from lead_monitor.app import main
 
 sys.exit(main())

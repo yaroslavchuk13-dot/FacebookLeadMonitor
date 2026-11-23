@@ -25,6 +25,21 @@ export async function sendPosts(settings, posts) {
   return accepted;
 }
 
+/** Asks the server whether monitoring is paused (/pause in Telegram). Unreachable -> not paused. */
+export async function getControl(settings) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${settings.port}/api/control`, {
+      headers: { "X-Extension-Token": settings.token },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) return { paused: false };
+    const data = await response.json();
+    return { paused: Boolean(data.paused) };
+  } catch {
+    return { paused: false };
+  }
+}
+
 /** Best effort: an alert must never break the monitor loop. */
 export async function sendAlert(settings, alert) {
   try {

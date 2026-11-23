@@ -102,3 +102,37 @@ def test_data_survives_reopen(tmp_path: Path) -> None:
 def test_content_hash_ignores_case_and_spacing() -> None:
     assert content_hash(make_post(text="Need  a\nPlumber")) == content_hash(make_post(text="need a plumber"))
     assert content_hash(make_post(text="a")) != content_hash(make_post(text="b"))
+
+
+# --- Telegram delivery columns (migration 2) ---------------------------------------------
+
+
+def test_pending_and_mark_notified(db: Database) -> None:
+    db.add_post(make_post(1), LEAD)
+    db.add_post(make_post(2), NOT_LEAD)
+    pending = db.pending_leads()
+    assert [p["id"] for p in pending] == [1]
+    db.mark_notified(1, 555)
+    assert db.pending_leads() == []
+
+
+def test_migration_2_does_not_resend_old_leads(tmp_path: Path) -> None:
+    """Leads saved before Telegram existed must not arrive as a burst of old messages."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(MIGRATIONS[0])
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute(
+        "INSERT INTO posts (post_url, group_id, text, content_hash, collected_at, saved_at, is_lead) "
+        "VALUES ('https://www.facebook.com/groups/g/posts/1/', 'g', 't', 'h', '2026-01-01', "
+        "'2099-01-01T00:00:00+00:00', 1)"
+    )
+    conn.commit()
+    conn.close()
+
+    upgraded = Database(path)
+    assert upgraded.schema_version == len(MIGRATIONS)
+    assert upgraded.pending_leads() == []
+    upgraded.close()

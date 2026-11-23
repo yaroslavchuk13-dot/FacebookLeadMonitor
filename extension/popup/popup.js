@@ -39,7 +39,9 @@ function renderMonitor() {
   $("stop").disabled = !m.running;
 
   const lines = [];
-  if (m.lastRun) {
+  if (m.lastRun?.status === "paused") {
+    lines.push(`⏸ Пауза з Telegram (о ${formatTime(m.lastRun.at)}). /resume у боті — продовжити.`);
+  } else if (m.lastRun) {
     const r = m.lastRun;
     lines.push(`Остання група: ${r.groupName ?? r.groupId} о ${formatTime(r.at)}`);
     lines.push(`Результат: ${STATUS_TEXT[r.status] ?? r.status}, знайдено ${r.found}, надіслано ${r.sent}`);

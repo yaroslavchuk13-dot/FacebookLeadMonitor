@@ -68,6 +68,9 @@ globalThis.chrome = {
 globalThis.fetch = async (url, init) => {
   if (!fake.serverUp) throw new TypeError("Failed to fetch");
   const path = new URL(url).pathname;
+  if (path === "/api/control") {
+    return { ok: true, status: 200, json: async () => ({ paused: fake.paused }) };
+  }
   const body = JSON.parse(init.body);
   fake.requests.push({ path, body });
   const json = path === "/api/posts" ? { accepted: body.posts.length, rejected: 0 } : { ok: true };
@@ -79,6 +82,7 @@ const {
   resumeIfRunning,
   runTick,
   startMonitor,
+  stopByUser,
   stopMonitor,
   timing,
   watchdog,
@@ -112,6 +116,7 @@ beforeEach(() => {
     badge: "",
     requests: [],
     serverUp: true,
+    paused: false,
   });
 });
 
@@ -268,4 +273,29 @@ test("last run keeps the group name for the popup", async () => {
   fake.pageResult = { ...okPage(), groupName: "Firestoppers UK Work" };
   await runTick();
   assert.equal(monitor().lastRun.groupName, "Firestoppers UK Work");
+});
+
+// --- pause from Telegram / start-stop notifications ----------------------------------------
+
+test("paused from Telegram: no Facebook visit, next check is scheduled", async () => {
+  fake.paused = true;
+  await runTick();
+  assert.deepEqual(fake.navigations, []);
+  assert.equal(monitor().lastRun.status, "paused");
+  assert.ok(fake.alarms.has(ALARM_NAME));
+
+  fake.paused = false; // /resume
+  await runTick();
+  assert.equal(fake.navigations.length, 1);
+});
+
+test("start and stop are reported to the server", async () => {
+  fake.store.monitor = { running: false };
+  await startMonitor();
+  await waitFor(() => fake.alarms.has(ALARM_NAME));
+  await stopByUser();
+  const kinds = alertRequests().map((r) => r.body.kind);
+  assert.deepEqual(kinds, ["started", "stopped"]);
+  assert.equal(alertRequests()[1].body.stopped, true);
+  assert.equal(monitor().running, false);
 });

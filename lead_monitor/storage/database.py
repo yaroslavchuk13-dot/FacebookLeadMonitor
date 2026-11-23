@@ -12,7 +12,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,21 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_posts_content_hash ON posts(content_hash);
     CREATE INDEX idx_posts_saved_at ON posts(saved_at);
     """,
+    # 2: Telegram delivery — leads with notified_at IS NULL are (re)sent by the notifier.
+    """
+    ALTER TABLE posts ADD COLUMN notified_at TEXT;
+    ALTER TABLE posts ADD COLUMN telegram_message_id INTEGER;
+    -- Leads saved before Telegram existed must not be sent as a burst of old messages.
+    UPDATE posts SET notified_at = saved_at WHERE is_lead = 1;
+    CREATE INDEX idx_posts_pending ON posts(is_lead, notified_at);
+    """,
 ]
+
+# Columns returned for a lead (Telegram notifier, statistics).
+LEAD_COLUMNS = (
+    "id, saved_at, group_id, group_name, author_name, author_profile_url, post_url, text, "
+    "matched_keywords"
+)
 
 
 @dataclass(frozen=True)
@@ -157,11 +171,34 @@ class Database:
     def recent_leads(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                """
-                SELECT id, saved_at, group_id, group_name, author_name, post_url, text,
-                       matched_keywords
-                FROM posts WHERE is_lead = 1 ORDER BY id DESC LIMIT ?
-                """,
+                f"SELECT {LEAD_COLUMNS} FROM posts WHERE is_lead = 1 ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [{**dict(r), "matched_keywords": json.loads(r["matched_keywords"])} for r in rows]
+        return [_lead_row(r) for r in rows]
+
+    # --- Telegram delivery ------------------------------------------------------------
+
+    def pending_leads(self, max_age_hours: int = 24, limit: int = 20) -> list[dict[str, Any]]:
+        """Leads not yet sent to Telegram (oldest first). Older ones are not worth sending."""
+        since = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT {LEAD_COLUMNS} FROM posts
+                WHERE is_lead = 1 AND notified_at IS NULL AND saved_at >= ?
+                ORDER BY id LIMIT ?
+                """,
+                (since, limit),
+            ).fetchall()
+        return [_lead_row(r) for r in rows]
+
+    def mark_notified(self, post_id: int, message_id: int | None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE posts SET notified_at = ?, telegram_message_id = ? WHERE id = ?",
+                (_now(), message_id, post_id),
+            )
+
+
+def _lead_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {**dict(row), "matched_keywords": json.loads(row["matched_keywords"])}

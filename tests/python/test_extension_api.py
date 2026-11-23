@@ -148,3 +148,24 @@ def test_alert_requires_token() -> None:
 def test_invalid_alert_rejected(body: Any) -> None:
     status, alerts = send_alert(body)
     assert status == 400 and alerts == []
+
+
+# --- /api/control (pause from Telegram) and the "alive" mark -----------------------------
+
+
+def test_control_reports_pause_and_marks_extension_alive() -> None:
+    from lead_monitor.core.state import MonitorState
+
+    state = MonitorState(paused=True)
+
+    async def runner() -> tuple[int, Any, int]:
+        async with TestClient(TestServer(create_app(TOKEN, state=state))) as client:
+            ok = await client.get("/api/control", headers=AUTH)
+            denied = await client.get("/api/control")
+            return ok.status, await ok.json(), denied.status
+
+    status, data, denied_status = asyncio.run(runner())
+    assert status == 200 and data == {"paused": True}
+    assert denied_status == 401
+    assert state.extension_running is True
+    assert state.seconds_since_seen() is not None and state.seconds_since_seen() < 5

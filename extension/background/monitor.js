@@ -9,7 +9,7 @@ import {
   saveOutbox,
   updateMonitor,
 } from "../lib/storage.js";
-import { sendAlert, sendPosts } from "./server_api.js";
+import { getControl, sendAlert, sendPosts } from "./server_api.js";
 
 export const ALARM_NAME = "monitor-tick";
 // Restarts the loop if Chrome dropped the tick alarm (extension reload, service worker restart).
@@ -46,8 +46,22 @@ export async function startMonitor() {
   await updateMonitor({ running: true, alert: null, groupFailures: {}, currentVisit: null });
   await setBadge("ON", "#1a7f37");
   await chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: WATCHDOG_PERIOD_MIN });
+  await sendAlert(settings, {
+    kind: "started",
+    message: `Моніторинг запущено (груп: ${settings.groupIds.length}).`,
+  });
   runTick(); // first visit right away, do not wait for it
   return { ok: true };
+}
+
+/** "Stop" button: stop and tell the server (so it does not report the silence as a problem). */
+export async function stopByUser() {
+  await stopMonitor();
+  await sendAlert(await loadSettings(), {
+    kind: "stopped",
+    message: "Моніторинг зупинено вручну (кнопка «Стоп» у розширенні).",
+    stopped: true,
+  });
 }
 
 export async function stopMonitor(alert = null) {
@@ -110,6 +124,13 @@ async function tick() {
   const settings = await loadSettings();
   if (!settings.groupIds.length) {
     await stopMonitor({ kind: "error", message: "Список груп порожній.", at: Date.now() });
+    return;
+  }
+
+  if ((await getControl(settings)).paused) {
+    // /pause in Telegram: do not open Facebook, just check again later.
+    await updateMonitor({ lastRun: { groupId: null, at: Date.now(), status: "paused", found: 0, sent: 0 } });
+    await scheduleNext();
     return;
   }
 

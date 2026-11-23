@@ -76,7 +76,8 @@ class ScamCheckResult(BaseModel):
     checked_at: datetime = Field(default_factory=_utc_now)
 
 
-AlertKind = Literal["checkpoint", "login_required", "no_feed", "error"]
+# "started" / "stopped": the user pressed Start / Stop in the extension (not problems).
+AlertKind = Literal["checkpoint", "login_required", "no_feed", "error", "started", "stopped"]
 
 
 class ExtensionAlert(BaseModel):

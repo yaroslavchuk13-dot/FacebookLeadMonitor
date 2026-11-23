@@ -4,7 +4,7 @@ import {
   resumeIfRunning,
   runTick,
   startMonitor,
-  stopMonitor,
+  stopByUser,
   watchdog,
   WATCHDOG_ALARM,
 } from "./monitor.js";
@@ -27,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   const handlers = {
     "monitor:start": () => startMonitor(),
-    "monitor:stop": () => stopMonitor().then(() => ({ ok: true })),
+    "monitor:stop": () => stopByUser().then(() => ({ ok: true })),
   };
   const handler = handlers[message?.type];
   if (!handler) return false;
