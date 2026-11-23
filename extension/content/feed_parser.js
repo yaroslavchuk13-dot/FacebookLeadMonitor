@@ -16,6 +16,8 @@
   const SCROLL_SCREENS = 2; // Facebook loads more posts only while the page is scrolled
   const SCROLL_PAUSE_MIN_MS = 1200;
   const SCROLL_PAUSE_MAX_MS = 2000;
+  // aria-label of comment articles: "Comment by …" / "Коментар від …" / "Комментарий от …"
+  const COMMENT_LABEL_RE = /comment|коментар|комментар/i;
 
   const { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton } =
     globalThis.FLM.postLinks;
@@ -33,22 +35,45 @@
     return cleanText(h1?.innerText).split("\n")[0] || null;
   }
 
-  /** True if `el` belongs to `root` itself, not to a nested article (a comment). */
+  /**
+   * True if `el` belongs to the post itself, not to a comment.
+   * root is either the post's article, or a feed unit whose articles are all comments.
+   */
   function isOwn(el, root) {
     const nearest = el.closest(ARTICLE);
-    return nearest === null || nearest === root;
+    if (root.matches(ARTICLE)) return nearest === root;
+    return nearest === null || !root.contains(nearest);
   }
 
   const own = (root, selector) => [...root.querySelectorAll(selector)].filter((el) => isOwn(el, root));
 
-  /** Posts are top-level articles; comments are articles nested inside them. */
+  const topLevelArticles = (container) =>
+    [...container.querySelectorAll(ARTICLE)].filter((a) => !a.parentElement?.closest(ARTICLE));
+
+  const isCommentArticle = (article) => COMMENT_LABEL_RE.test(article.getAttribute("aria-label") ?? "");
+
+  /**
+   * Facebook marks comments with role="article"; the post itself may or may not be one.
+   * Returns the element that holds the post (its article, or the whole feed unit).
+   */
+  function postRoot(unit) {
+    if (unit.matches(ARTICLE)) return unit;
+    const articles = topLevelArticles(unit);
+    const withMessage = articles.find((a) => a.querySelector(MESSAGE));
+    if (withMessage) return withMessage; // the post is an article
+    if (unit.querySelector(MESSAGE)) return unit; // post text outside articles -> articles are comments
+    const textOutsideArticles = [...unit.querySelectorAll('[dir="auto"]')].some((el) => !el.closest(ARTICLE));
+    if (textOutsideArticles) return unit;
+    const candidates = articles.filter((a) => !isCommentArticle(a));
+    return candidates.length === 1 ? candidates[0] : unit;
+  }
+
+  /** One post per feed unit (direct child of the feed). */
   function postElements(feed) {
-    const articles = [...feed.querySelectorAll(ARTICLE)].filter(
-      (a) => !a.parentElement?.closest(ARTICLE),
-    );
-    if (articles.length) return articles;
-    // Fallback for layouts without role="article".
-    return [...feed.children].filter((el) => el.innerText?.trim());
+    const units = [...feed.children].filter((el) => el.innerText?.trim());
+    const articles = topLevelArticles(feed);
+    if (units.length <= 1 && articles.length > 1) return articles; // unusual wrapper layout
+    return units.map(postRoot);
   }
 
   function findPostUrl(post, groupId) {
@@ -179,5 +204,57 @@
     return { status: "ok", groupId, groupName: groupName(), posts, skipped, expanded };
   }
 
-  globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { parseFeed });
+  /**
+   * Structure-only report of the current feed, for debugging the parser on real pages.
+   * Contains counts and link shapes only — no names, no post text.
+   */
+  function diagnoseFeed() {
+    const groupId = groupIdFromLocation();
+    const feed = document.querySelector(FEED);
+    const lines = [
+      `FLM diagnostics | lang=${document.documentElement.lang} | visible=${document.visibilityState}` +
+        ` | scrollY=${Math.round(window.scrollY)} | group=${groupId ? "yes" : "no"} | feed=${feed ? "yes" : "no"}`,
+    ];
+    if (!feed) return lines.join("\n");
+
+    const units = [...feed.children];
+    lines.push(`feed children=${units.length} | articles in feed=${feed.querySelectorAll(ARTICLE).length}` +
+      ` | top-level articles=${topLevelArticles(feed).length}`);
+    units.slice(0, 30).forEach((unit, i) => {
+      const root = postRoot(unit);
+      const articles = topLevelArticles(unit);
+      const links = own(root, "a[href]").map((a) => a.getAttribute("href"));
+      const postLinks = links.filter((h) => canonicalPostUrl(h, groupId)).length;
+      const hashLinks = links.filter((h) => h === "#").length;
+      const linkShapes = [...new Set(links.map(linkShape))].slice(0, 6).join(" ");
+      lines.push(
+        `#${i} textLen=${(unit.innerText ?? "").trim().length}` +
+          ` root=${root === unit ? "unit" : "article"}` +
+          ` articles=${unit.querySelectorAll(ARTICLE).length}/top=${articles.length}/comments=${articles.filter(isCommentArticle).length}` +
+          ` msg=${unit.querySelectorAll(MESSAGE).length}/own=${own(root, MESSAGE).length}` +
+          ` posinset=${unit.querySelector("[aria-posinset]") ? "y" : "n"}` +
+          ` postLinks=${postLinks} hash=${hashLinks} ownText=${findText(root).length}` +
+          ` author=${findAuthor(root).url ? "link" : findAuthor(root).name ? "name" : "none"}` +
+          ` links=[${linkShapes}]`,
+      );
+    });
+    return lines.join("\n");
+  }
+
+  /** "/groups/123/posts/456/?x" -> "/groups/N/posts/N/" (ids hidden, shape kept). */
+  function linkShape(href) {
+    if (!href || href === "#") return "#";
+    try {
+      const url = new URL(href, location.origin);
+      const path = url.pathname.replace(/\d+/g, "N").replace(/\/pfbid\w+/g, "/pfbid");
+      const parts = path.split("/").filter(Boolean);
+      const shape = parts.length === 1 && !parts[0].includes(".") ? "/<name>" : path;
+      const params = [...url.searchParams.keys()].filter((k) => !k.startsWith("__")).join(",");
+      return params ? `${shape}?${params}` : shape;
+    } catch {
+      return "?";
+    }
+  }
+
+  globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { parseFeed, diagnoseFeed });
 })();

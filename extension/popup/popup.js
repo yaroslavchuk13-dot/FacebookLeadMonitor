@@ -167,6 +167,28 @@ async function onParseTab() {
   }
 }
 
+/** Copies a structure-only report of the open group page (no names / post text). */
+async function onDiagnoseTab() {
+  const preview = $("preview");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || parseGroupId(tab.url) === null) {
+    preview.textContent = "Відкрийте сторінку Facebook-групи в поточній вкладці.";
+    return;
+  }
+  try {
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: TEST_SCRIPTS });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target,
+      func: () => globalThis.FLM.diagnoseFeed(),
+    });
+    await navigator.clipboard.writeText(result);
+    preview.textContent = `✓ Скопійовано в буфер обміну — вставте в чат (Ctrl+V).\n\n${result}`;
+  } catch (err) {
+    preview.textContent = `Помилка діагностики: ${err.message}`;
+  }
+}
+
 // --- init ------------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -180,6 +202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("save").addEventListener("click", onSave);
   $("check").addEventListener("click", onCheck);
   $("parse-tab").addEventListener("click", onParseTab);
+  $("diagnose-tab").addEventListener("click", onDiagnoseTab);
 
   await refreshMonitor();
   chrome.storage.onChanged.addListener((changes, area) => {
