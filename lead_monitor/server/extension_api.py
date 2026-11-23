@@ -7,6 +7,7 @@ in the X-Extension-Token header. Run: `python -m lead_monitor.server`.
 import hmac
 import json
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 
 from aiohttp import web
@@ -15,6 +16,9 @@ from pydantic import ValidationError
 from lead_monitor.core.config import get_settings
 from lead_monitor.core.log_setup import setup_logging
 from lead_monitor.core.models import ExtensionAlert, FacebookPost
+from lead_monitor.filters.keywords import KeywordFile
+from lead_monitor.pipeline import PostProcessor
+from lead_monitor.storage.database import Database
 
 log = logging.getLogger(__name__)
 
@@ -116,13 +120,40 @@ def create_app(
     return app
 
 
+def port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((HOST, port))
+        except OSError:
+            return False
+    return True
+
+
 def main() -> int:
     settings = get_settings()
     setup_logging(settings)
     if settings.extension_token is None:
         log.error("EXTENSION_TOKEN is not set in .env — refusing to start the server")
         return 1
-    app = create_app(settings.extension_token.get_secret_value())
+    if not port_is_free(settings.extension_port):
+        log.error(
+            "Port %d is already in use — the server is probably already running in another "
+            "terminal window. Close it first or keep using it.",
+            settings.extension_port,
+        )
+        return 1
+
+    database = Database(settings.database_path)
+    processor = PostProcessor(database, KeywordFile(settings.keywords_path))
+    processor.keywords.get()  # log the loaded keywords at startup
+    log.info("Database: %s | %s", settings.database_path, database.stats())
+
+    app = create_app(settings.extension_token.get_secret_value(), sink=processor.handle_posts)
+
+    async def close_database(_app: web.Application) -> None:
+        database.close()
+
+    app.on_cleanup.append(close_database)
     log.info("Extension server listening on http://%s:%d", HOST, settings.extension_port)
     web.run_app(app, host=HOST, port=settings.extension_port, print=None, access_log=None)
     return 0

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # Storage and logs
     database_path: Path = Path("data/monitor.db")
+    keywords_path: Path = Path("config/keywords.txt")
     log_dir: Path = Path("logs")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
         """Accept `info`, `Debug` etc."""
         return value.strip().upper() if isinstance(value, str) else value
 
-    @field_validator("database_path", "log_dir", mode="after")
+    @field_validator("database_path", "keywords_path", "log_dir", mode="after")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         """Relative paths are resolved from the project folder, not the CWD."""

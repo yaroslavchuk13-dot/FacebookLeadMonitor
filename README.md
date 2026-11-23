@@ -11,18 +11,28 @@ FacebookLeadMonitor/
 │   ├── core/                  основа, яку використовують усі частини
 │   │   ├── config.py          налаштування з .env
 │   │   ├── log_setup.py       логи з ротацією та приховуванням токенів
-│   │   └── models.py          моделі даних: допис, рівень скаму
-│   └── server/                локальний сервер для Chrome-розширення
-│       ├── __main__.py        запуск: python -m lead_monitor.server
-│       └── extension_api.py   приймання дописів (127.0.0.1, токен)
+│   │   └── models.py          моделі даних: допис, рівень скаму, алерт
+│   ├── filters/
+│   │   └── keywords.py        фільтр ключових слів ([include] / [exclude])
+│   ├── storage/
+│   │   ├── database.py        SQLite: дописи, дублікати, ліди
+│   │   └── __main__.py        статистика й останні ліди
+│   ├── server/                локальний сервер для Chrome-розширення
+│   │   ├── __main__.py        запуск: python -m lead_monitor.server
+│   │   └── extension_api.py   приймання дописів і алертів (127.0.0.1, токен)
+│   └── pipeline.py            обробка: ключові слова → база → ліди
 ├── extension/                 Chrome-розширення (Manifest V3)
 │   ├── manifest.json
 │   ├── background/            фоновий цикл: по черзі відкриває групи, надсилає дописи
 │   ├── popup/                 вікно: Старт/Стоп, стан, налаштування, тест розбору
 │   ├── content/               код, що працює на сторінці групи (дописи, checkpoint)
 │   └── lib/                   спільні JS-функції (групи, паузи, сховище)
+├── config/
+│   └── keywords.txt           ключові слова (редагується, перечитується автоматично)
 ├── scripts/
-│   └── setup.ps1              встановлення на новому ПК
+│   ├── setup.ps1              встановлення на новому ПК
+│   ├── start_server.ps1       запуск сервера
+│   └── show_leads.ps1         статистика й останні ліди
 ├── tests/
 │   ├── python/                тести pytest
 │   └── js/                    тести node --test
@@ -32,8 +42,7 @@ FacebookLeadMonitor/
 ```
 
 Кожен наступний етап отримує власну папку в `lead_monitor/`
-(`storage/`, `monitoring/`, `filters/`, `notifications/`, `ai/`, `scam/`, `dashboard/`)
-і створюється лише тоді, коли до нього доходимо.
+(`notifications/`, `ai/`, `scam/`, `dashboard/`) і створюється лише тоді, коли до нього доходимо.
 
 Не потрапляють у Git: `.env` (секрети), `data/` (база), `logs/` (логи), `.venv/`.
 
@@ -59,8 +68,9 @@ FacebookLeadMonitor/
 
 | Що | Команда |
 |---|---|
-| Показати налаштування (без секретів) | `python -m lead_monitor.core.config` |
-| Запустити сервер для розширення | `python -m lead_monitor.server` |
+| Запустити сервер для розширення | `powershell -ExecutionPolicy Bypass -File scripts\start_server.ps1` |
+| Статистика й останні ліди | `powershell -ExecutionPolicy Bypass -File scripts\show_leads.ps1` |
+| Показати налаштування (без секретів) | `.\.venv\Scripts\python.exe -m lead_monitor.core.config` |
 | Python-тести | `python -m pytest` |
 | JS-тести | `node --test tests/js/` |
 

@@ -7,7 +7,7 @@ from lead_monitor.core.config import BASE_DIR, Settings
 
 ENV_NAMES = [
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "AI_PROVIDER", "OLLAMA_BASE_URL",
-    "OLLAMA_MODEL", "OPENAI_API_KEY", "OPENAI_MODEL", "DATABASE_PATH", "LOG_DIR",
+    "OLLAMA_MODEL", "OPENAI_API_KEY", "OPENAI_MODEL", "DATABASE_PATH", "KEYWORDS_PATH", "LOG_DIR",
     "LOG_LEVEL", "EXTENSION_PORT", "EXTENSION_TOKEN",
 ]
 
@@ -35,6 +35,7 @@ def test_relative_paths_resolved_from_project_folder() -> None:
     s = make()
     assert s.database_path == BASE_DIR / "data" / "monitor.db"
     assert s.log_dir == BASE_DIR / "logs"
+    assert s.keywords_path == BASE_DIR / "config" / "keywords.txt"
 
 
 def test_absolute_path_kept(tmp_path) -> None:
