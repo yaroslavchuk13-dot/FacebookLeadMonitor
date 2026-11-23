@@ -25,18 +25,34 @@ export async function sendPosts(settings, posts) {
   return accepted;
 }
 
-/** Asks the server whether monitoring is paused (/pause in Telegram). Unreachable -> not paused. */
+/**
+ * Asks the server what to do: paused (/pause in Telegram) and the next author profile
+ * to check ({ id, profile_url } or null). Unreachable server -> not paused, no profile.
+ */
 export async function getControl(settings) {
+  const none = { paused: false, profileCheck: null };
   try {
     const response = await fetch(`http://127.0.0.1:${settings.port}/api/control`, {
       headers: { "X-Extension-Token": settings.token },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!response.ok) return { paused: false };
+    if (!response.ok) return none;
     const data = await response.json();
-    return { paused: Boolean(data.paused) };
+    const check = data.profile_check;
+    const valid = check && Number.isInteger(check.id) && /^https:\/\/www\.facebook\.com\//.test(check.profile_url);
+    return { paused: Boolean(data.paused), profileCheck: valid ? check : null };
   } catch {
-    return { paused: false };
+    return none;
+  }
+}
+
+/** Sends the profile check result (numbers/flags only). Best effort. */
+export async function sendProfileResult(settings, checkId, profile) {
+  try {
+    await post(settings, "/api/profile_result", { check_id: checkId, profile });
+    return true;
+  } catch {
+    return false;
   }
 }
 

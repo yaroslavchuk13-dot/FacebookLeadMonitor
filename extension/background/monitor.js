@@ -9,7 +9,7 @@ import {
   saveOutbox,
   updateMonitor,
 } from "../lib/storage.js";
-import { getControl, sendAlert, sendPosts } from "./server_api.js";
+import { getControl, sendAlert, sendPosts, sendProfileResult } from "./server_api.js";
 
 export const ALARM_NAME = "monitor-tick";
 // Restarts the loop if Chrome dropped the tick alarm (extension reload, service worker restart).
@@ -17,6 +17,7 @@ export const WATCHDOG_ALARM = "monitor-watchdog";
 const WATCHDOG_PERIOD_MIN = 1;
 
 const CONTENT_SCRIPTS = ["content/post_links.js", "content/page_state.js", "content/feed_parser.js"];
+const PROFILE_SCRIPTS = ["content/page_state.js", "content/profile_parser.js"];
 // Waits inside one visit (tests set them to 0).
 export const timing = {
   pageLoadTimeoutMs: 45000,
@@ -127,10 +128,16 @@ async function tick() {
     return;
   }
 
-  if ((await getControl(settings)).paused) {
+  const control = await getControl(settings);
+  if (control.paused) {
     // /pause in Telegram: do not open Facebook, just check again later.
     await updateMonitor({ lastRun: { groupId: null, at: Date.now(), status: "paused", found: 0, sent: 0 } });
     await scheduleNext();
+    return;
+  }
+  if (control.profileCheck) {
+    // A new lead waits for the author scam check: this cycle opens the profile instead of a group.
+    await checkProfile(settings, monitor, control.profileCheck);
     return;
   }
 
@@ -178,6 +185,34 @@ async function tick() {
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),
   });
+  await scheduleNext();
+}
+
+/** Opens the author's profile, sends numbers/flags to the server (scam check). */
+async function checkProfile(settings, monitor, check) {
+  await updateMonitor({ currentVisit: { groupId: "профіль автора", startedAt: Date.now() }, nextRunAt: null });
+  const visit = await visitProfile(check.profile_url, monitor.tabId);
+
+  if (!(await loadMonitor()).running) return; // stopped by the user meanwhile
+  const lastRun = {
+    groupId: null,
+    groupName: "Перевірка автора",
+    at: Date.now(),
+    status: visit.status,
+    found: 0,
+    sent: 0,
+    error: visit.error ?? null,
+  };
+  if (STOP_STATES.has(visit.status)) {
+    const alert = { kind: visit.status, message: STOP_MESSAGES[visit.status], at: Date.now() };
+    await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastRun });
+    await sendAlert(settings, { kind: alert.kind, message: alert.message, stopped: true });
+    await stopMonitor(alert);
+    return;
+  }
+  const profile = visit.status === "ok" ? visit.profile : { status: "error" };
+  await sendProfileResult(settings, check.id, profile);
+  await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastRun });
   await scheduleNext();
 }
 
@@ -230,6 +265,29 @@ async function visitGroup(groupId, tabId) {
       await sleep(timing.emptyFeedRetryMs); // feed may still be loading
       result = await parseTab(tab.id);
     }
+    return { ...result, tabId: tab.id };
+  } catch (err) {
+    return { status: "error", error: err.message, tabId: tab?.id ?? null };
+  }
+}
+
+/** Opens a profile in the monitor tab. Returns { status, tabId, profile?, error? }. */
+async function visitProfile(profileUrl, tabId) {
+  let tab;
+  try {
+    tab = await ensureTab(tabId);
+    await navigateAndWait(tab.id, profileUrl);
+    await sleep(randomBetween(timing.renderWaitMinMs, timing.renderWaitMaxMs));
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: PROFILE_SCRIPTS });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target,
+      func: () => {
+        const state = globalThis.FLM.pageState();
+        if (state !== "ok") return { status: state };
+        return { status: "ok", profile: globalThis.FLM.parseProfile() };
+      },
+    });
     return { ...result, tabId: tab.id };
   } catch (err) {
     return { status: "error", error: err.message, tabId: tab?.id ?? null };

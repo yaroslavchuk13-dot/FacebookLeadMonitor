@@ -49,12 +49,36 @@ MIGRATIONS: list[str] = [
     UPDATE posts SET notified_at = saved_at WHERE is_lead = 1;
     CREATE INDEX idx_posts_pending ON posts(is_lead, notified_at);
     """,
+    # 3: scam check of the author. Only the verdict and human-readable signs are stored.
+    """
+    ALTER TABLE posts ADD COLUMN scam_level TEXT;          -- pending | green | yellow | red
+    ALTER TABLE posts ADD COLUMN scam_red TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE posts ADD COLUMN scam_green TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE posts ADD COLUMN scam_checked_at TEXT;
+    -- Profiles the extension has to open (one per monitor cycle).
+    CREATE TABLE profile_checks (
+        id           INTEGER PRIMARY KEY,
+        post_id      INTEGER NOT NULL REFERENCES posts(id),
+        profile_url  TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',      -- pending | done | failed | expired
+        completed_at TEXT
+    );
+    CREATE INDEX idx_profile_checks_status ON profile_checks(status, id);
+    -- Profile signs per author, reused for some days so the same profile is not reopened.
+    CREATE TABLE author_profiles (
+        profile_url TEXT PRIMARY KEY,
+        red         TEXT NOT NULL DEFAULT '[]',
+        green       TEXT NOT NULL DEFAULT '[]',
+        checked_at  TEXT NOT NULL
+    );
+    """,
 ]
 
 # Columns returned for a lead (Telegram notifier, statistics).
 LEAD_COLUMNS = (
     "id, saved_at, group_id, group_name, author_name, author_profile_url, post_url, text, "
-    "matched_keywords"
+    "matched_keywords, telegram_message_id, scam_level, scam_red, scam_green"
 )
 
 
@@ -200,5 +224,98 @@ class Database:
             )
 
 
+    # --- scam check -----------------------------------------------------------------------
+
+    def get_lead(self, post_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(f"SELECT {LEAD_COLUMNS} FROM posts WHERE id = ?", (post_id,)).fetchone()
+        return _lead_row(row) if row else None
+
+    def set_scam_result(self, post_id: int, level: str, red: list[str], green: list[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE posts SET scam_level = ?, scam_red = ?, scam_green = ?, scam_checked_at = ? "
+                "WHERE id = ?",
+                (level, _json(red), _json(green), _now(), post_id),
+            )
+
+    def add_profile_check(self, post_id: int, profile_url: str) -> int:
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO profile_checks (post_id, profile_url, requested_at) VALUES (?, ?, ?)",
+                (post_id, profile_url, _now()),
+            )
+        return cursor.lastrowid
+
+    def next_profile_check(self) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, post_id, profile_url FROM profile_checks WHERE status = 'pending' "
+                "ORDER BY id LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_profile_check(self, check_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, post_id, profile_url, status FROM profile_checks WHERE id = ?", (check_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def finish_profile_checks(self, profile_url: str, status: str) -> list[int]:
+        """Closes all pending checks of this profile; returns their post ids."""
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT post_id FROM profile_checks WHERE profile_url = ? AND status = 'pending'",
+                (profile_url,),
+            ).fetchall()
+            self._conn.execute(
+                "UPDATE profile_checks SET status = ?, completed_at = ? "
+                "WHERE profile_url = ? AND status = 'pending'",
+                (status, _now(), profile_url),
+            )
+        return [r["post_id"] for r in rows]
+
+    def expire_profile_checks(self, older_than_minutes: int) -> list[int]:
+        """Pending checks the extension did not do in time; returns their post ids."""
+        since = (datetime.now(UTC) - timedelta(minutes=older_than_minutes)).isoformat(timespec="seconds")
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT id, post_id FROM profile_checks WHERE status = 'pending' AND requested_at < ?",
+                (since,),
+            ).fetchall()
+            self._conn.executemany(
+                "UPDATE profile_checks SET status = 'expired', completed_at = ? WHERE id = ?",
+                [(_now(), r["id"]) for r in rows],
+            )
+        return [r["post_id"] for r in rows]
+
+    def get_author_profile(self, profile_url: str, max_age_days: int) -> dict[str, list[str]] | None:
+        since = (datetime.now(UTC) - timedelta(days=max_age_days)).isoformat(timespec="seconds")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT red, green FROM author_profiles WHERE profile_url = ? AND checked_at >= ?",
+                (profile_url, since),
+            ).fetchone()
+        return {"red": json.loads(row["red"]), "green": json.loads(row["green"])} if row else None
+
+    def save_author_profile(self, profile_url: str, red: list[str], green: list[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO author_profiles (profile_url, red, green, checked_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(profile_url) DO UPDATE SET red = excluded.red, green = excluded.green, "
+                "checked_at = excluded.checked_at",
+                (profile_url, _json(red), _json(green), _now()),
+            )
+
+
+def _json(items: list[str]) -> str:
+    return json.dumps(items, ensure_ascii=False)
+
+
 def _lead_row(row: sqlite3.Row) -> dict[str, Any]:
-    return {**dict(row), "matched_keywords": json.loads(row["matched_keywords"])}
+    data = dict(row)
+    for key in ("matched_keywords", "scam_red", "scam_green"):
+        if key in data:
+            data[key] = json.loads(data[key] or "[]")
+    return data

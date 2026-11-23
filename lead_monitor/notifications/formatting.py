@@ -39,10 +39,34 @@ def format_lead(lead: dict[str, Any]) -> str:
     keywords = lead.get("matched_keywords") or []
     if keywords:
         lines.append("🔑 " + escape(", ".join(keywords)))
+    lines += format_scam(lead)
     lines += ["", escape(text)]
     if is_fallback_link(lead["post_url"]):
         lines += ["", "<i>Посилання на сам допис не знайдено — кнопка відкриє групу.</i>"]
     return "\n".join(lines)
+
+
+MAX_SCAM_REASONS = 4
+
+
+def format_scam(lead: dict[str, Any]) -> list[str]:
+    """Lines about the author check; empty for leads saved before the scam check existed."""
+    level = lead.get("scam_level")
+    red = lead.get("scam_red") or []
+    green = lead.get("scam_green") or []
+    if not level:
+        return []
+    if level == "pending":
+        return ["👤 <i>Перевіряю автора…</i>"]
+    reasons_red = [escape(r) if r.startswith("ℹ️") else f"• {escape(r)}" for r in red]
+    if len(reasons_red) > MAX_SCAM_REASONS:
+        extra = len(reasons_red) - MAX_SCAM_REASONS
+        reasons_red = [*reasons_red[:MAX_SCAM_REASONS], f"…і ще {extra}"]
+    if level == "red":
+        return ["🔴 <b>Схоже на скам</b>", *reasons_red]
+    if level == "green":
+        return ["🟢 Явних ознак скаму не знайдено", *[f"✓ {escape(g)}" for g in green][:MAX_SCAM_REASONS]]
+    return ["🟡 <b>Будьте уважні</b>", *(reasons_red or ["• Мало даних про автора"])]
 
 
 def lead_button_text(lead: dict[str, Any]) -> str:

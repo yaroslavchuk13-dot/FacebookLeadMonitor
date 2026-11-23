@@ -69,10 +69,12 @@ globalThis.fetch = async (url, init) => {
   if (!fake.serverUp) throw new TypeError("Failed to fetch");
   const path = new URL(url).pathname;
   if (path === "/api/control") {
-    return { ok: true, status: 200, json: async () => ({ paused: fake.paused }) };
+    const control = { paused: fake.paused, profile_check: fake.profileCheck };
+    return { ok: true, status: 200, json: async () => control };
   }
   const body = JSON.parse(init.body);
   fake.requests.push({ path, body });
+  if (path === "/api/profile_result") fake.profileCheck = null; // the server closes the check
   const json = path === "/api/posts" ? { accepted: body.posts.length, rejected: 0 } : { ok: true };
   return { ok: true, status: 200, json: async () => json };
 };
@@ -117,6 +119,7 @@ beforeEach(() => {
     requests: [],
     serverUp: true,
     paused: false,
+    profileCheck: null,
   });
 });
 
@@ -298,4 +301,47 @@ test("start and stop are reported to the server", async () => {
   assert.deepEqual(kinds, ["started", "stopped"]);
   assert.equal(alertRequests()[1].body.stopped, true);
   assert.equal(monitor().running, false);
+});
+
+// --- author profile check (scam check) -----------------------------------------------------
+
+const PROFILE_URL = "https://www.facebook.com/profile.php?id=42";
+
+test("a queued profile check is done instead of a group visit", async () => {
+  fake.profileCheck = { id: 7, profile_url: PROFILE_URL };
+  fake.pageResult = { status: "ok", profile: { status: "ok", has_photo: true, friends: 300 } };
+  await runTick();
+  assert.deepEqual(fake.navigations, [PROFILE_URL]);
+  const result = fake.requests.find((r) => r.path === "/api/profile_result");
+  assert.deepEqual(result.body, { check_id: 7, profile: { status: "ok", has_photo: true, friends: 300 } });
+  assert.equal(monitor().lastRun.groupName, "Перевірка автора");
+  assert.ok(fake.alarms.has(ALARM_NAME));
+
+  fake.pageResult = okPage();
+  await runTick(); // no more checks -> back to groups
+  assert.equal(new URL(fake.navigations[1]).pathname, "/groups/aaa/");
+});
+
+test("checkpoint on a profile stops monitoring", async () => {
+  fake.profileCheck = { id: 8, profile_url: PROFILE_URL };
+  fake.pageResult = { status: "checkpoint" };
+  await runTick();
+  assert.equal(monitor().running, false);
+  assert.equal(alertRequests()[0].body.kind, "checkpoint");
+  assert.equal(fake.requests.some((r) => r.path === "/api/profile_result"), false);
+});
+
+test("a profile that fails to open is reported as an error", async () => {
+  fake.profileCheck = { id: 9, profile_url: PROFILE_URL };
+  fake.pageResult = null; // executeScript gives nothing -> exception inside the visit
+  await runTick();
+  const result = fake.requests.find((r) => r.path === "/api/profile_result");
+  assert.deepEqual(result.body, { check_id: 9, profile: { status: "error" } });
+  assert.equal(monitor().running, true);
+});
+
+test("a profile url outside facebook.com is ignored", async () => {
+  fake.profileCheck = { id: 10, profile_url: "https://evil.example.com/x" };
+  await runTick();
+  assert.equal(new URL(fake.navigations[0]).pathname, "/groups/aaa/");
 });

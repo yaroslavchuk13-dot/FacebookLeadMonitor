@@ -37,6 +37,12 @@ SILENCE_ALERT_SECONDS = 10 * 60  # extension silent this long while monitoring -
 SILENCE_CHECK_SECONDS = 60
 
 
+def _lead_markup(lead: dict[str, Any]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=lead_button_text(lead), url=lead["post_url"])]]
+    )
+
+
 def create_bot(token: str) -> Bot:
     return Bot(
         token,
@@ -61,6 +67,7 @@ class TelegramService:
         self.keywords = keywords
         self.send_interval = send_interval
         self._alerts: asyncio.Queue[str] = asyncio.Queue()
+        self._edits: set[int] = set()  # lead ids whose message must be updated (scam verdict)
         self._wake = asyncio.Event()
         self.last_round_failed = False  # True if the last delivery round hit a network error
 
@@ -68,6 +75,11 @@ class TelegramService:
 
     async def notify_lead(self, lead: StoredPost) -> None:
         """Lead handler for the pipeline: the lead is already in the database, just wake up."""
+        self._wake.set()
+
+    async def notify_verdict(self, post_id: int) -> None:
+        """Scam check finished: the lead message (if already sent) gets edited."""
+        self._edits.add(post_id)
         self._wake.set()
 
     async def notify_alert(self, alert: ExtensionAlert) -> None:
@@ -100,12 +112,37 @@ class TelegramService:
                 self.last_round_failed = True
                 return sent
             sent += 1
+
+        for post_id in sorted(self._edits):
+            lead = await asyncio.to_thread(self.database.get_lead, post_id)
+            if lead is None or not lead.get("telegram_message_id"):
+                self._edits.discard(post_id)  # not sent yet: it will be sent with the verdict
+                continue
+            if await self._edit_lead(lead) is None:
+                self.last_round_failed = True
+                return sent
+            self._edits.discard(post_id)
+            sent += 1
         return sent
 
+    async def _edit_lead(self, lead: dict[str, Any]) -> bool | None:
+        try:
+            result = await self._call(
+                lambda: self.bot.edit_message_text(
+                    text=format_lead(lead),
+                    chat_id=self.chat_id,
+                    message_id=lead["telegram_message_id"],
+                    reply_markup=_lead_markup(lead),
+                )
+            )
+        except TelegramBadRequest as err:
+            # e.g. "message is not modified" or the message was deleted — nothing to retry.
+            log.info("Lead #%d message not edited: %s", lead["id"], err)
+            return False
+        return None if result is None else True
+
     async def _send_lead(self, lead: dict[str, Any]) -> bool | None:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text=lead_button_text(lead), url=lead["post_url"])]]
-        )
+        markup = _lead_markup(lead)
         try:
             message = await self._call(
                 lambda: self.bot.send_message(self.chat_id, format_lead(lead), reply_markup=markup)

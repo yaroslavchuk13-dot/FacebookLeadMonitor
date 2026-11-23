@@ -165,7 +165,7 @@ def test_control_reports_pause_and_marks_extension_alive() -> None:
             return ok.status, await ok.json(), denied.status
 
     status, data, denied_status = asyncio.run(runner())
-    assert status == 200 and data == {"paused": True}
+    assert status == 200 and data == {"paused": True, "profile_check": None}
     assert denied_status == 401
     assert state.extension_running is True
     assert state.seconds_since_seen() is not None and state.seconds_since_seen() < 5

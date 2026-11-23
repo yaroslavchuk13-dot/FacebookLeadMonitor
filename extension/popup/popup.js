@@ -43,14 +43,17 @@ function renderMonitor() {
     lines.push(`⏸ Пауза з Telegram (о ${formatTime(m.lastRun.at)}). /resume у боті — продовжити.`);
   } else if (m.lastRun) {
     const r = m.lastRun;
-    lines.push(`Остання група: ${r.groupName ?? r.groupId} о ${formatTime(r.at)}`);
+    lines.push(`Остання перевірка: ${r.groupName ?? r.groupId} о ${formatTime(r.at)}`);
     lines.push(`Результат: ${STATUS_TEXT[r.status] ?? r.status}, знайдено ${r.found}, надіслано ${r.sent}`);
     if (r.error) lines.push(`⚠ ${r.error}`);
   }
   if (m.running) {
     if (m.currentVisit) {
       const sec = Math.round((Date.now() - m.currentVisit.startedAt) / 1000);
-      lines.push(`⏳ Перевіряю групу ${m.currentVisit.groupId}… (${sec} с)`);
+      const what = m.currentVisit.groupId === "профіль автора"
+        ? "профіль автора (перевірка на скам)"
+        : `групу ${m.currentVisit.groupId}`;
+      lines.push(`⏳ Перевіряю ${what}… (${sec} с)`);
     } else if (m.nextRunAt) {
       const sec = Math.max(0, Math.round((m.nextRunAt - Date.now()) / 1000));
       lines.push(`Наступна перевірка через ${sec} с`);

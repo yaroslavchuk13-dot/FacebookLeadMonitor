@@ -10,12 +10,14 @@ from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 
-from lead_monitor.core.config import Settings, get_settings
+from lead_monitor.core.config import BASE_DIR, Settings, get_settings
 from lead_monitor.core.log_setup import setup_logging
 from lead_monitor.core.models import ExtensionAlert, FacebookPost
 from lead_monitor.core.state import MonitorState
 from lead_monitor.filters.keywords import KeywordFile
 from lead_monitor.pipeline import PostProcessor, log_lead
+from lead_monitor.scam.rules import ScamRules
+from lead_monitor.scam.service import ScamChecker
 from lead_monitor.server.extension_api import HOST, create_app, log_alert_sink, port_is_free
 from lead_monitor.storage.database import Database
 
@@ -85,7 +87,10 @@ async def run(settings: Settings) -> None:
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set — leads are only saved and logged")
 
-    handlers = [log_lead] + ([telegram.notify_lead] if telegram else [])
+    scam_rules = ScamRules.load(BASE_DIR / "config" / "scam_rules.toml")
+    scam = ScamChecker(database, scam_rules, [telegram.notify_verdict] if telegram else [])
+    # Order matters: the scam check runs first, so a ready verdict goes into the first message.
+    handlers = [log_lead, scam.on_new_lead] + ([telegram.notify_lead] if telegram else [])
     processor = PostProcessor(database, keywords, handlers)
 
     async def posts_sink(posts: list[FacebookPost]) -> None:
@@ -103,26 +108,27 @@ async def run(settings: Settings) -> None:
             await telegram.notify_alert(alert)
 
     app = create_app(
-        settings.extension_token.get_secret_value(), sink=posts_sink, alert_sink=alert_sink, state=state
+        settings.extension_token.get_secret_value(),
+        sink=posts_sink,
+        alert_sink=alert_sink,
+        state=state,
+        scam_checker=scam,
     )
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     await web.TCPSite(runner, HOST, settings.extension_port).start()
     log.info("Extension server listening on http://%s:%d", HOST, settings.extension_port)
 
-    tasks = []
+    tasks = [supervise("Scam check expiry", scam.run_expiry)]
     if telegram:
-        tasks = [
+        tasks += [
             supervise("Telegram polling", telegram.run_polling),
             supervise("Telegram delivery", telegram.run_delivery),
             supervise("Silence watch", telegram.run_silence_watch),
         ]
         log.info("Telegram bot started")
     try:
-        if tasks:
-            await asyncio.gather(*tasks)
-        else:
-            await asyncio.Event().wait()  # run until Ctrl+C
+        await asyncio.gather(*tasks)  # runs until Ctrl+C
     finally:
         await runner.cleanup()
         if bot is not None:

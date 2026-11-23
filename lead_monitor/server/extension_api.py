@@ -15,6 +15,8 @@ from pydantic import ValidationError
 
 from lead_monitor.core.models import ExtensionAlert, FacebookPost
 from lead_monitor.core.state import MonitorState
+from lead_monitor.scam.rules import ProfileSignals
+from lead_monitor.scam.service import ScamChecker
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ TOKEN_KEY = web.AppKey("token", str)
 SINK_KEY = web.AppKey("sink", PostSink)
 ALERT_SINK_KEY = web.AppKey("alert_sink", AlertSink)
 STATE_KEY = web.AppKey("state", MonitorState)
+SCAM_KEY = web.AppKey("scam_checker", object)  # ScamChecker | None
 
 
 async def log_sink(posts: list[FacebookPost]) -> None:
@@ -66,10 +69,26 @@ async def health(_request: web.Request) -> web.Response:
 
 
 async def control(request: web.Request) -> web.Response:
-    """Polled by the extension before every group visit."""
+    """Polled by the extension before every visit: pause flag and the next profile to check."""
     state = request.app[STATE_KEY]
     state.extension_running = True  # it asks -> it is monitoring
-    return web.json_response({"paused": state.paused})
+    checker = request.app[SCAM_KEY]
+    task = None if state.paused or checker is None else await checker.next_task()
+    return web.json_response({"paused": state.paused, "profile_check": task})
+
+
+async def receive_profile_result(request: web.Request) -> web.Response:
+    checker = request.app[SCAM_KEY]
+    if checker is None:
+        return web.json_response({"error": "scam check disabled"}, status=404)
+    try:
+        body = await request.json()
+        check_id = int(body["check_id"])
+        profile = ProfileSignals.model_validate(body.get("profile") or {})
+    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, ValueError, ValidationError):
+        return web.json_response({"error": "invalid profile result"}, status=400)
+    accepted = await checker.complete(check_id, profile)
+    return web.json_response({"ok": accepted})
 
 
 async def receive_posts(request: web.Request) -> web.Response:
@@ -115,6 +134,7 @@ def create_app(
     sink: PostSink = log_sink,
     alert_sink: AlertSink = log_alert_sink,
     state: MonitorState | None = None,
+    scam_checker: ScamChecker | None = None,
 ) -> web.Application:
     if not token:
         raise ValueError("Extension token must not be empty")
@@ -123,10 +143,12 @@ def create_app(
     app[SINK_KEY] = sink
     app[ALERT_SINK_KEY] = alert_sink
     app[STATE_KEY] = state if state is not None else MonitorState()
+    app[SCAM_KEY] = scam_checker
     app.router.add_get("/health", health)
     app.router.add_get("/api/control", control)
     app.router.add_post("/api/posts", receive_posts)
     app.router.add_post("/api/alert", receive_alert)
+    app.router.add_post("/api/profile_result", receive_profile_result)
     return app
 
 

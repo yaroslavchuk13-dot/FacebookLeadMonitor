@@ -1,0 +1,37 @@
+# Правила перевірки автора вакансії на скам.
+# Після змін перезапустіть програму.
+#
+# Висновок:
+#   🔴 червоних ознак >= red_for_scam
+#   🟡 1 червона ознака, змішані ознаки або мало даних
+#   🟢 жодної червоної, більшість ознак зелені («явних ознак скаму не знайдено», не 100% гарантія)
+
+[verdict]
+red_for_scam = 2
+
+[pay]
+# Оплата вище цих меж — підозріло (типово для fire stopping: £20–30/год, £180–250/день)
+max_realistic_hourly = 45
+max_realistic_daily = 400
+
+[profile]
+min_friends = 20          # менше — червона ознака
+good_friends = 100        # стільки й більше — зелена
+new_account_years = 1     # акаунт молодший — червона ознака
+old_account_years = 3     # акаунт старший — зелена
+cache_days = 7            # не відкривати той самий профіль частіше
+check_timeout_minutes = 60  # якщо розширення не відкрило профіль за цей час — висновок без профілю
+
+[text]
+# Фрази в дописі (без урахування регістру; достатньо частини слова)
+prepayment = [
+    "upfront", "up front", "deposit", "admin fee", "registration fee", "processing fee",
+    "application fee", "pay for your", "pay for the card", "pay for cscs", "send money",
+    "western union", "moneygram", "передоплат", "предоплат",
+]
+messenger_only = [
+    "only whatsapp", "whatsapp only", "only telegram", "telegram only", "only on telegram",
+    "only on whatsapp", "dm on telegram", "message me on telegram", "contact on telegram",
+    "write to telegram", "t.me/",
+]
+crypto = ["crypto", "bitcoin", "btc", "usdt", "binance", "ethereum", "криптовалют"]
