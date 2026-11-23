@@ -109,3 +109,15 @@ test("'see less' is removed from expanded text and never treated as 'see more'",
     assert.equal(isSeeMoreButton(label), false, label);
   }
 });
+
+test("fallback post url is stable and ignores case/spacing", () => {
+  const { fallbackPostUrl } = globalThis.FLM.postLinks;
+  const a = fallbackPostUrl("g1", "https://www.facebook.com/x", "Need  fire\nstoppers");
+  const b = fallbackPostUrl("g1", "https://www.facebook.com/x", "need fire stoppers");
+  assert.equal(a, b);
+  assert.match(a, /^https:\/\/www\.facebook\.com\/groups\/g1\/\?flm_post=[0-9a-f]{16}$/);
+  assert.notEqual(a, fallbackPostUrl("g1", "https://www.facebook.com/y", "need fire stoppers"));
+  assert.notEqual(a, fallbackPostUrl("g1", "https://www.facebook.com/x", "need plumbers"));
+  // not mistaken for a real post link
+  assert.equal(canonicalPostUrl(a, "g1"), null);
+});

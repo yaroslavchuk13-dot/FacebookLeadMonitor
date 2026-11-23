@@ -13,14 +13,21 @@
   const CLICK_PAUSE_MIN_MS = 250; // human-like pause between button clicks
   const CLICK_PAUSE_MAX_MS = 600;
   const AFTER_CLICKS_WAIT_MS = 800; // let Facebook re-render the expanded text
-  const SCROLL_SCREENS = 2; // Facebook loads more posts only while the page is scrolled
+  const SCROLL_STEPS = 6; // read, scroll, read... Facebook renders only posts near the screen
+  const MAX_HOVER_PER_POST = 6;
   const SCROLL_PAUSE_MIN_MS = 1200;
   const SCROLL_PAUSE_MAX_MS = 2000;
   // aria-label of comment articles: "Comment by …" / "Коментар від …" / "Комментарий от …"
   const COMMENT_LABEL_RE = /comment|коментар|комментар/i;
 
-  const { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton } =
-    globalThis.FLM.postLinks;
+  const {
+    canonicalPostUrl,
+    canonicalProfileUrl,
+    cleanText,
+    fallbackPostUrl,
+    isSeeMoreButton,
+    isSeeOriginalButton,
+  } = globalThis.FLM.postLinks;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const randomBetween = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
@@ -84,22 +91,37 @@
     return null;
   }
 
+  /** Links that may become the post link on hover (the timestamp): not author, not hashtag. */
+  function hoverCandidates(post) {
+    return own(post, 'a, [role="link"]')
+      .filter((el) => {
+        const href = el.getAttribute("href");
+        if (!href || href === "#") return true;
+        if (canonicalProfileUrl(href)) return false; // author / mentions: would open hover cards
+        return !/\/(hashtag|stories|reel|photo|watch)\b/.test(href);
+      })
+      .slice(0, MAX_HOVER_PER_POST);
+  }
+
   /**
-   * Facebook often fills the timestamp link's href only on mouse hover.
-   * Simulate hover on links without a real href, then read again.
+   * Facebook fills the timestamp link's href only on mouse hover.
+   * Simulate hover on candidate links, then read again.
    */
   async function revealLazyLinks(posts) {
-    const touched = [];
-    for (const post of posts) {
-      for (const a of own(post, 'a[href="#"], a:not([href])').slice(0, 5)) {
-        a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-        a.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-        touched.push(a);
+    const touched = posts.flatMap(hoverCandidates);
+    if (!touched.length) return;
+    for (const el of touched) {
+      for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter"]) {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("over"), view: window }));
+      }
+      el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    }
+    await sleep(HOVER_WAIT_MS);
+    for (const el of touched) {
+      for (const type of ["pointerout", "pointerleave", "mouseout", "mouseleave"]) {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("out"), view: window }));
       }
     }
-    if (!touched.length) return;
-    await sleep(HOVER_WAIT_MS);
-    for (const a of touched) a.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
   }
 
   function findAuthor(post) {
@@ -124,15 +146,6 @@
     }
     const parts = [...new Set(blocks.map((el) => cleanText(el.innerText)).filter(Boolean))];
     return cleanText(parts.join("\n")).slice(0, MAX_TEXT_LENGTH);
-  }
-
-  /** Scrolls down a couple of screens so Facebook loads more posts, then back to the top. */
-  async function loadMorePosts() {
-    for (let i = 0; i < SCROLL_SCREENS; i += 1) {
-      window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" });
-      await sleep(randomBetween(SCROLL_PAUSE_MIN_MS, SCROLL_PAUSE_MAX_MS));
-    }
-    window.scrollTo({ top: 0 });
   }
 
   /**
@@ -163,45 +176,62 @@
   }
 
   /**
-   * Returns { status, groupId, groupName, posts, skipped }.
-   * status: "ok" | "not_group" | "no_feed". Posts match the server's FacebookPost model.
+   * Reads the posts that are rendered right now and adds new ones to `state.found`.
+   * Facebook unloads posts far from the screen, so this runs at every scroll step.
    */
-  async function parseFeed() {
-    const groupId = groupIdFromLocation();
-    if (!groupId) return { status: "not_group", groupId: null, groupName: null, posts: [], skipped: 0 };
+  async function collectVisible(feed, groupId, state) {
+    const roots = postElements(feed).filter((root) => !state.done.has(root) && findText(root));
+    if (!roots.length) return;
 
-    const feed = document.querySelector(FEED);
-    if (!feed) return { status: "no_feed", groupId, groupName: groupName(), posts: [], skipped: 0 };
+    const expanded = await expandPosts(roots);
+    state.expanded.originals += expanded.originals;
+    state.expanded.seeMore += expanded.seeMore;
+    await revealLazyLinks(roots.filter((root) => !findPostUrl(root, groupId)));
 
-    await loadMorePosts();
-    const elements = postElements(feed);
-    const expanded = await expandPosts(elements);
-    const missingUrl = elements.filter((el) => !findPostUrl(el, groupId));
-    await revealLazyLinks(missingUrl);
-
-    const posts = [];
-    const seen = new Set();
-    let skipped = 0; // ads, loading placeholders, photo-only posts, repeats
-    for (const el of elements) {
-      const postUrl = findPostUrl(el, groupId);
-      const text = findText(el);
-      if (!postUrl || !text || seen.has(postUrl)) {
-        skipped += 1;
-        continue;
-      }
-      seen.add(postUrl);
-      const author = findAuthor(el);
-      posts.push({
+    for (const root of roots) {
+      const text = findText(root);
+      if (!text) continue;
+      const author = findAuthor(root);
+      const realUrl = findPostUrl(root, groupId);
+      // No post link found: keep the post anyway, with a stable group link (dedup by text).
+      const postUrl = realUrl ?? fallbackPostUrl(groupId, author.url ?? author.name, text);
+      state.done.add(root);
+      if (state.found.has(postUrl)) continue;
+      state.found.set(postUrl, {
         group_id: groupId,
         group_name: groupName(),
         post_url: postUrl,
+        link_found: Boolean(realUrl), // for the popup only; the server ignores it
         author_name: author.name,
         author_profile_url: author.url,
         text,
       });
     }
+  }
+
+  /**
+   * Returns { status, groupId, groupName, posts, expanded }.
+   * status: "ok" | "not_group" | "no_feed". Posts match the server's FacebookPost model.
+   */
+  async function parseFeed() {
+    const groupId = groupIdFromLocation();
+    if (!groupId) return { status: "not_group", groupId: null, groupName: null, posts: [] };
+
+    const feed = document.querySelector(FEED);
+    if (!feed) return { status: "no_feed", groupId, groupName: groupName(), posts: [] };
+
+    const state = { found: new Map(), done: new WeakSet(), expanded: { originals: 0, seeMore: 0 } };
+    window.scrollTo({ top: 0 });
+    for (let step = 0; step <= SCROLL_STEPS; step += 1) {
+      await collectVisible(feed, groupId, state);
+      if (step === SCROLL_STEPS) break;
+      // Instant scroll: "smooth" does not move a tab that is not visible (the monitor tab).
+      window.scrollBy(0, Math.round(window.innerHeight * 0.85));
+      await sleep(randomBetween(SCROLL_PAUSE_MIN_MS, SCROLL_PAUSE_MAX_MS));
+    }
+    window.scrollTo({ top: 0 });
     // expanded: how many "See original" / "See more" buttons were clicked.
-    return { status: "ok", groupId, groupName: groupName(), posts, skipped, expanded };
+    return { status: "ok", groupId, groupName: groupName(), posts: [...state.found.values()], expanded: state.expanded };
   }
 
   /**
@@ -226,7 +256,12 @@
       const links = own(root, "a[href]").map((a) => a.getAttribute("href"));
       const postLinks = links.filter((h) => canonicalPostUrl(h, groupId)).length;
       const hashLinks = links.filter((h) => h === "#").length;
-      const linkShapes = [...new Set(links.map(linkShape))].slice(0, 6).join(" ");
+      // Every link-like element: shape of href, +L if it has aria-label (timestamps usually do).
+      const linkShapes = [...new Set(own(root, 'a, [role="link"]').map((el) => {
+        const tag = el.tagName === "A" ? "" : `${el.tagName.toLowerCase()}:`;
+        const label = el.hasAttribute("aria-label") ? "+L" : "";
+        return `${tag}${linkShape(el.getAttribute("href"))}${label}`;
+      }))].slice(0, 10).join(" ");
       lines.push(
         `#${i} textLen=${(unit.innerText ?? "").trim().length}` +
           ` root=${root === unit ? "unit" : "article"}` +
@@ -243,7 +278,9 @@
 
   /** "/groups/123/posts/456/?x" -> "/groups/N/posts/N/" (ids hidden, shape kept). */
   function linkShape(href) {
+    if (href === null) return "(no-href)";
     if (!href || href === "#") return "#";
+    if (canonicalProfileUrl(href) && !href.includes("/groups/")) return "/<profile>"; // hide user names
     try {
       const url = new URL(href, location.origin);
       const path = url.pathname.replace(/\d+/g, "N").replace(/\/pfbid\w+/g, "/pfbid");

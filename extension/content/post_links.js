@@ -119,6 +119,33 @@
       .trim();
   }
 
-  const api = { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton };
+  /** 32-bit FNV-1a hash as 8 hex chars (stable across runs, no crypto needed). */
+  function fnv1a(text, seed = 0x811c9dc5) {
+    let hash = seed;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  }
+
+  /**
+   * Used when Facebook did not reveal the post link: a stable group URL derived from
+   * author + text, so the same post always gets the same URL (deduplication works).
+   */
+  function fallbackPostUrl(groupId, authorKey, text) {
+    const key = `${authorKey ?? ""}\n${String(text ?? "").toLowerCase().replace(/\s+/g, " ").trim()}`;
+    const id = fnv1a(key) + fnv1a(key, 0x2c9277b5);
+    return `${FB}/groups/${encodeURIComponent(groupId)}/?flm_post=${id}`;
+  }
+
+  const api = {
+    canonicalPostUrl,
+    canonicalProfileUrl,
+    cleanText,
+    fallbackPostUrl,
+    isSeeMoreButton,
+    isSeeOriginalButton,
+  };
   globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { postLinks: api });
 })();
