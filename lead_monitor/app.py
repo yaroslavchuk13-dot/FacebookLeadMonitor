@@ -22,19 +22,40 @@ from lead_monitor.storage.database import Database
 log = logging.getLogger(__name__)
 
 RESTART_DELAY_SECONDS = 30
+MAX_RESTART_DELAY_SECONDS = 15 * 60
+STABLE_RUN_SECONDS = 10 * 60  # a task that ran this long counts as healthy again
+
+
+def restart_delay(attempt: int, error: BaseException) -> float:
+    """Exponential backoff (30 s, 60 s, 120 s ... 15 min); never shorter than Telegram's retry_after.
+
+    Restarting sooner than Telegram asks only extends its flood ban.
+    """
+    delay = min(RESTART_DELAY_SECONDS * 2 ** max(0, attempt - 1), MAX_RESTART_DELAY_SECONDS)
+    retry_after = getattr(error, "retry_after", None)
+    if isinstance(retry_after, (int, float)):
+        delay = max(delay, retry_after + 5)
+    return delay
 
 
 async def supervise(name: str, task: Callable[[], Awaitable[None]]) -> None:
-    """Keeps a background task alive: logs a crash and restarts it after a pause."""
+    """Keeps a background task alive: logs a crash and restarts it with growing pauses."""
+    attempt = 0
     while True:
+        started = time.monotonic()
         try:
             await task()
             return
         except asyncio.CancelledError:
             raise
-        except Exception:
-            log.exception("%s crashed — restarting in %d s", name, RESTART_DELAY_SECONDS)
-            await asyncio.sleep(RESTART_DELAY_SECONDS)
+        except Exception as error:
+            if time.monotonic() - started > STABLE_RUN_SECONDS:
+                attempt = 0
+            attempt += 1
+            delay = restart_delay(attempt, error)
+            log.error("%s failed (%s) — restarting in %d s", name, error, delay)
+            log.debug("Details of the %s failure", name, exc_info=True)
+            await asyncio.sleep(delay)
 
 
 def _parse_chat_id(settings: Settings) -> int | None:
