@@ -156,7 +156,11 @@ async function onParseTab() {
       preview.textContent = `Стрічку не знайдено (${result.status}). Прокрутіть сторінку і спробуйте ще.`;
       return;
     }
-    const header = `Група: ${result.groupName ?? result.groupId}\nДописів: ${result.posts.length}, пропущено: ${result.skipped}`;
+    const exp = result.expanded ?? { originals: 0, seeMore: 0 };
+    const header =
+      `Група: ${result.groupName ?? result.groupId}\n` +
+      `Дописів: ${result.posts.length}, пропущено: ${result.skipped}\n` +
+      `Розгорнуто «Ещё»: ${exp.seeMore}, показано оригінал замість перекладу: ${exp.originals}`;
     const posts = result.posts.slice(0, PREVIEW_POSTS).map((p) => {
       const author = p.author_name ?? "(анонімно)";
       const profile = p.author_profile_url ? "" : " [без профілю]";

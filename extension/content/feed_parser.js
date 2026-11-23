@@ -9,10 +9,16 @@
   const NOT_TEXT = '[role="button"], a, h2, h3, h4, strong';
   const MAX_TEXT_LENGTH = 10000;
   const HOVER_WAIT_MS = 400;
+  const MAX_CLICKS_PER_PASS = 15;
+  const CLICK_PAUSE_MIN_MS = 250; // human-like pause between button clicks
+  const CLICK_PAUSE_MAX_MS = 600;
+  const AFTER_CLICKS_WAIT_MS = 800; // let Facebook re-render the expanded text
 
-  const { canonicalPostUrl, canonicalProfileUrl, cleanText } = globalThis.FLM.postLinks;
+  const { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton } =
+    globalThis.FLM.postLinks;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const randomBetween = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
 
   function groupIdFromLocation() {
     const parts = location.pathname.split("/").filter(Boolean);
@@ -93,6 +99,33 @@
   }
 
   /**
+   * Clicks the buttons accepted by `isTarget` inside posts (not in comments).
+   * Returns how many were clicked.
+   */
+  async function clickButtons(posts, isTarget) {
+    const buttons = posts
+      .flatMap((post) => own(post, '[role="button"]'))
+      .filter((b) => isTarget(b.innerText))
+      .slice(0, MAX_CLICKS_PER_PASS);
+    for (const button of buttons) {
+      button.click();
+      await sleep(randomBetween(CLICK_PAUSE_MIN_MS, CLICK_PAUSE_MAX_MS));
+    }
+    if (buttons.length) await sleep(AFTER_CLICKS_WAIT_MS);
+    return buttons.length;
+  }
+
+  /**
+   * Shows the author's original text instead of Facebook's auto-translation,
+   * then expands truncated posts ("See more" / "Ещё").
+   */
+  async function expandPosts(posts) {
+    const originals = await clickButtons(posts, isSeeOriginalButton);
+    const seeMore = await clickButtons(posts, isSeeMoreButton);
+    return { originals, seeMore };
+  }
+
+  /**
    * Returns { status, groupId, groupName, posts, skipped }.
    * status: "ok" | "not_group" | "no_feed". Posts match the server's FacebookPost model.
    */
@@ -104,6 +137,7 @@
     if (!feed) return { status: "no_feed", groupId, groupName: groupName(), posts: [], skipped: 0 };
 
     const elements = postElements(feed);
+    const expanded = await expandPosts(elements);
     const missingUrl = elements.filter((el) => !findPostUrl(el, groupId));
     await revealLazyLinks(missingUrl);
 
@@ -136,6 +170,7 @@
       posts,
       skipped: skippedDetails.length,
       skippedDetails, // for the popup test only, never sent to the server
+      expanded, // how many "See original" / "See more" buttons were clicked
     };
   }
 

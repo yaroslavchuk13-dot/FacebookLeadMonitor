@@ -74,3 +74,28 @@ test("text is cleaned", () => {
   assert.equal(cleanText("a b"), "a b");
   assert.equal(cleanText(null), "");
 });
+
+test("see more / see original buttons are recognized (en/uk/ru)", () => {
+  const { isSeeMoreButton, isSeeOriginalButton } = globalThis.FLM.postLinks;
+  for (const label of ["See more", "Ещё", "Еще", " Детальніше ", "Показати більше", "see MORE"]) {
+    assert.equal(isSeeMoreButton(label), true, label);
+  }
+  for (const label of ["See more comments", "Ещё 5 комментариев", "Нравится", "", null]) {
+    assert.equal(isSeeMoreButton(label), false, String(label));
+  }
+  for (const label of ["Показать оригинал", "See original", "Показати оригінал"]) {
+    assert.equal(isSeeOriginalButton(label), true, label);
+  }
+  assert.equal(isSeeOriginalButton("Оцените этот перевод"), false);
+});
+
+test("translation controls are removed from text", () => {
+  assert.equal(
+    cleanText("ПОЖАР DBS СЕГОДНЯ\nОдин текст\nПоказать оригинал · Оцените этот перевод"),
+    "ПОЖАР DBS СЕГОДНЯ\nОдин текст",
+  );
+  assert.equal(cleanText("Need a plumber\nSee translation"), "Need a plumber");
+  assert.equal(cleanText("Од... Ещё"), "Од");
+  // A normal sentence that merely contains the words is kept.
+  assert.equal(cleanText("Please see original drawings"), "Please see original drawings");
+});

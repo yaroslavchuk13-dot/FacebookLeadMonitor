@@ -73,15 +73,42 @@
     return null;
   }
 
-  // "See more" link text that gets glued to truncated posts.
-  const SEE_MORE_RE = /(?:…|\.\.\.)?\s*(?:See more|Детальніше|Показати більше|Ещё|Читать дальше)\s*$/i;
+  // Button labels in the Facebook UI (English / Ukrainian / Russian).
+  const SEE_MORE_WORDS = ["See more", "Детальніше", "Показати більше", "Більше", "Ещё", "Еще", "Читать дальше"];
+  const SEE_ORIGINAL_WORDS = ["See original", "Показати оригінал", "Переглянути оригінал", "Показать оригинал"];
+  const TRANSLATION_FOOTER_WORDS = [
+    ...SEE_ORIGINAL_WORDS,
+    "Rate this translation", "See translation",
+    "Оцініть цей переклад", "Переглянути переклад", "Показати переклад",
+    "Оцените этот перевод", "Показать перевод", "Посмотреть перевод",
+  ];
 
-  /** Normalizes post text: trims lines, collapses blank lines, drops "See more". */
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const exactWordsRe = (words) => new RegExp(`^(?:${words.map(escapeRe).join("|")})$`, "i");
+  const SEE_MORE_BUTTON_RE = exactWordsRe(SEE_MORE_WORDS);
+  const SEE_ORIGINAL_BUTTON_RE = exactWordsRe(SEE_ORIGINAL_WORDS);
+
+  // "See more" text glued to the end of a truncated post.
+  const SEE_MORE_RE = new RegExp(`(?:…|\\.\\.\\.)?\\s*(?:${SEE_MORE_WORDS.map(escapeRe).join("|")})\\s*$`, "i");
+  // A line made only of translation controls: "Показать оригинал · Оцените этот перевод".
+  const TRANSLATION_LINE_RE = new RegExp(
+    `^(?:\\s*(?:${TRANSLATION_FOOTER_WORDS.map(escapeRe).join("|")})\\s*[·•]?)+$`,
+    "i",
+  );
+
+  const buttonLabel = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+  /** True for the "See more" / "Ещё" button that expands a truncated post. */
+  const isSeeMoreButton = (text) => SEE_MORE_BUTTON_RE.test(buttonLabel(text));
+  /** True for the "See original" button of an auto-translated post. */
+  const isSeeOriginalButton = (text) => SEE_ORIGINAL_BUTTON_RE.test(buttonLabel(text));
+
+  /** Normalizes post text: trims lines, collapses blank lines, drops "See more" and translation controls. */
   function cleanText(text) {
     return String(text ?? "")
       .replace(/ /g, " ")
       .split("\n")
       .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .filter((line) => !TRANSLATION_LINE_RE.test(line))
       .join("\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
@@ -89,6 +116,6 @@
       .trim();
   }
 
-  const api = { canonicalPostUrl, canonicalProfileUrl, cleanText };
+  const api = { canonicalPostUrl, canonicalProfileUrl, cleanText, isSeeMoreButton, isSeeOriginalButton };
   globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { postLinks: api });
 })();
