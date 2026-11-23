@@ -6,6 +6,7 @@ from typing import Any
 
 from lead_monitor.core.models import ExtensionAlert
 from lead_monitor.core.state import MonitorState
+from lead_monitor.filters.pay import describe_pay
 
 MAX_TEXT_CHARS = 3500  # Telegram limit is 4096 for the whole message
 FALLBACK_LINK_MARK = "flm_post="  # see extension/content/post_links.js fallbackPostUrl
@@ -34,7 +35,7 @@ def format_lead(lead: dict[str, Any]) -> str:
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS].rstrip() + "…"
 
-    lines = [f"🔔 <b>Новий лід</b> · {group}", author_line]
+    lines = [f"🔔 <b>Новий лід</b> · {group}", f"💷 <b>{escape(describe_pay(lead['text']))}</b>", author_line]
     keywords = lead.get("matched_keywords") or []
     if keywords:
         lines.append("🔑 " + escape(", ".join(keywords)))

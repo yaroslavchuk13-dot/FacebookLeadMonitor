@@ -1,24 +1,180 @@
-# Ключові слова для пошуку потенційних клієнтів.
+# Ключові слова: вакансії fire stopping у Лондоні.
 # Файл можна редагувати під час роботи — програма перечитає його сама.
 #
-# Правила:
+# ЯК ПРАЦЮЄ: допис стає лідом, якщо в ньому є хоча б одне слово З КОЖНОГО розділу
+# ([trade] І [offer] І [location]) і немає жодного слова з [exclude].
+#
+# Правила запису:
 #   * одне слово або фраза на рядок; регістр не важливий;
 #   * шукаються цілі слова: "fire" НЕ спрацює на "fireplace";
-#   * зірочка в кінці — будь-яке закінчення: "plumb*" = plumber, plumbing;
-#   * рядки, що починаються з #, — коментарі.
-#
-# Допис стає лідом, якщо містить хоча б одне слово з [include]
-# і жодного слова з [exclude].
-# ПОКИ [include] ПОРОЖНІЙ — КОЖЕН НОВИЙ ДОПИС ВВАЖАЄТЬСЯ ЛІДОМ (зручно для тестів).
+#   * зірочка в кінці — будь-яке закінчення: "fire stop*" = fire stopper, fire stopping;
+#   * "re:" на початку — шаблон (regex), для поштових кодів;
+#   * рядки з # — коментарі (щоб вимкнути слово, поставте # на початку).
+#   * Новий розділ [назва] = ще одна обов'язкова умова. Видалити розділ = прибрати умову.
 
-[include]
-# Приклади (приберіть # на початку рядка, щоб увімкнути):
-# fire stopping
-# fire stopper*
-# looking for
-# anyone recommend*
+[trade]
+# Ремесло: про що вакансія
+fire stop*
+firestop*
+fire-stop*
+passive fire
+fire protection
+fire door*
+fire seal*
+intumescent
+penetration seal*
+cavity barrier*
+compartmentation
+
+[offer]
+# Ознаки пропозиції роботи (а не пошуку роботи)
+required
+needed
+wanted
+urgent*
+need
+we need
+looking for a
+looking for an
+is looking for
+are looking for
+hiring
+we're hiring
+vacanc*
+position*
+immediate start
+start asap
+asap start
+start tomorrow
+start monday
+start date
+per hour
+per day
+p/h
+an hour
+a day
+day rate
+contract rate
+pay rate
+price work
+£*
+
+[location]
+# Лондон: місто, райони, поштові коди
+london
+city of london
+# Центральні райони / великі об'єкти
+moorgate
+liverpool street
+aldgate
+whitechapel
+shoreditch
+farringdon
+holborn
+blackfriars
+london bridge
+southbank
+waterloo
+westminster
+mayfair
+marylebone
+paddington
+euston
+kings cross
+king's cross
+st pancras
+canary wharf
+docklands
+royal docks
+silvertown
+stratford
+nine elms
+battersea
+vauxhall
+elephant and castle
+bermondsey
+white city
+old oak
+wembley
+# Боро (округи) Лондона
+barking
+dagenham
+barnet
+bexley
+brent
+bromley
+camden
+croydon
+ealing
+enfield
+greenwich
+hackney
+hammersmith
+fulham
+haringey
+harrow
+havering
+hillingdon
+hounslow
+islington
+kensington
+chelsea
+kingston
+lambeth
+lewisham
+merton
+newham
+redbridge
+richmond
+southwark
+sutton
+tower hamlets
+waltham forest
+wandsworth
+# Інші відомі райони
+brixton
+clapham
+peckham
+woolwich
+deptford
+tottenham
+walthamstow
+ilford
+romford
+uxbridge
+hayes
+heathrow
+wimbledon
+putney
+chiswick
+acton
+# Поштові коди Лондона: EC1–4, WC1–2, E1–20, N1–22, NW1–11, SE1–28, SW1–20, W1–14
+re:\b(?:ec[1-4][a-z]?|wc[12][a-z]?|e(?:1[0-9]|20|[1-9])w?|n(?:1[0-9]|2[0-2]|[1-9])|nw(?:1[01]|[1-9])|se(?:2[0-8]|1[0-9]|[1-9])|sw(?:1[0-9]|20|[1-9])[a-z]?|w(?:1[0-4]|[1-9])[a-z]?)\b
+# Поруч із Лондоном — приберіть #, якщо підходить:
+# watford
+# slough
+# dartford
+# brentwood
 
 [exclude]
-# Приклади:
-# we are hiring
-# drop us a message
+# Люди, які самі шукають роботу (це не вакансії)
+re:\blooking for (?:\w+ ){0,3}(?:work|jobs?)\b
+available for work
+seeking work
+seeking employment
+need work
+needs work
+work wanted
+anyone got work
+anyone have work
+anyone need*
+does anyone need
+if anyone needs
+# Реклама курсів, продаж
+for sale
+selling
+get registered
+cscs course*
+cscs test*
+nvq course*
+training course*

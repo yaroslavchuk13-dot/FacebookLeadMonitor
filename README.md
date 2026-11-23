@@ -14,7 +14,8 @@ FacebookLeadMonitor/
 │   │   ├── models.py          моделі даних: допис, рівень скаму, алерт
 │   │   └── state.py           спільний стан: пауза, зв'язок із розширенням
 │   ├── filters/
-│   │   └── keywords.py        фільтр ключових слів ([include] / [exclude])
+│   │   ├── keywords.py        фільтр: групи слів ([trade] І [offer] І [location]) + [exclude]
+│   │   └── pay.py             оплата з тексту: £/год, £/день, оцінка за день
 │   ├── storage/
 │   │   ├── database.py        SQLite: дописи, дублікати, ліди
 │   │   └── __main__.py        статистика й останні ліди
@@ -33,7 +34,7 @@ FacebookLeadMonitor/
 │   ├── content/               код, що працює на сторінці групи (дописи, checkpoint)
 │   └── lib/                   спільні JS-функції (групи, паузи, сховище)
 ├── config/
-│   └── keywords.txt           ключові слова (редагується, перечитується автоматично)
+│   └── keywords.txt           ключові слова: вакансії fire stopping у Лондоні (перечитується автоматично)
 ├── scripts/
 │   ├── setup.ps1              встановлення на новому ПК
 │   ├── start_server.ps1       запуск програми (сервер + Telegram-бот)

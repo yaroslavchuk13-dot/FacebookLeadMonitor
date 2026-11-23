@@ -47,10 +47,60 @@ def test_empty_include_means_every_post_is_a_lead() -> None:
 def test_parse_file_format() -> None:
     f = parse_keyword_text(
         "# comment\n\n[include]\nfire stopping\n  plumb*  \n[EXCLUDE]\nwe are hiring\n"
-        "[unknown]\nignored\n"
+        "[location]\nlondon\n"
     )
-    assert f.include == ["fire stopping", "plumb*"]
+    assert f.groups == {"include": ["fire stopping", "plumb*"], "location": ["london"]}
     assert f.exclude == ["we are hiring"]
+
+
+# --- groups: every group must match --------------------------------------------------------
+
+GROUPS_FILE = """
+[trade]
+fire stop*
+fire door*
+[offer]
+required
+looking for a
+[location]
+london
+greenwich
+re:\\b(?:se|sw|ec|wc|e|n|nw|w)\\d{1,2}[a-z]?\\b
+[exclude]
+looking for work
+"""
+
+
+def test_all_groups_must_match() -> None:
+    f = parse_keyword_text(GROUPS_FILE)
+    ok = f.match("CSCS Fire Stopper required tomorrow in Greenwich £27.50 per hour")
+    assert ok.is_lead
+    assert ok.matched == ["fire stop*", "required", "greenwich"]
+
+    no_location = f.match("Fire Door Installers required on site in Watford, WD24")
+    assert not no_location.is_lead
+    assert no_location.missing_groups == ["location"]
+
+    no_offer = f.match("Fire stopping in London is hard")
+    assert not no_offer.is_lead and no_offer.missing_groups == ["offer"]
+
+
+def test_regex_terms_for_postcodes() -> None:
+    f = parse_keyword_text(GROUPS_FILE)
+    assert f.match("Fire stopper required, site SE10 0AA").is_lead
+    assert f.match("fire stopper required in EC2A").is_lead
+    assert not f.match("fire stopper required in WD24").is_lead
+
+
+def test_exclude_beats_groups() -> None:
+    f = parse_keyword_text(GROUPS_FILE)
+    result = f.match("Team of 3 Fire Stoppers looking for work in London, required asap")
+    assert not result.is_lead and result.excluded_by == ["looking for work"]
+
+
+def test_invalid_regex_is_ignored() -> None:
+    f = parse_keyword_text("[location]\nre:(unclosed\nlondon\n")
+    assert f.groups == {"location": ["london"]}
 
 
 def test_lines_outside_sections_are_ignored() -> None:

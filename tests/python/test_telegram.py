@@ -211,3 +211,10 @@ def test_real_bot_object_can_be_created() -> None:
     bot = telegram_module.create_bot("123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi")
     assert bot.default.parse_mode == "HTML"
     asyncio.run(bot.session.close())
+
+
+def test_lead_message_shows_pay() -> None:
+    lead = {**LEAD, "text": "Fire stopper required in Moorgate\n9hrs paid\nContract rate £25/h"}
+    assert "💷 <b>£25/год (≈ £225 за 9-год день)</b>" in format_lead(lead)
+    no_pay = {**LEAD, "text": "Fire stopper required in Moorgate, rate negotiable"}
+    assert "💷 <b>Оплата не вказана</b>" in format_lead(no_pay)
