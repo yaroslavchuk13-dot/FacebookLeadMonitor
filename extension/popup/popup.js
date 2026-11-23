@@ -16,6 +16,13 @@ const STATUS_TEXT = {
   error: "помилка",
 };
 
+const SKIP_REASONS = {
+  no_link_no_text: "немає ні посилання, ні тексту (реклама / заглушка?)",
+  no_link: "не знайдено посилання на допис",
+  no_text: "немає тексту (лише фото / відео?)",
+  duplicate: "повтор",
+};
+
 const $ = (id) => document.getElementById(id);
 
 function showMessage(id, text, kind = "") {
@@ -156,7 +163,12 @@ async function onParseTab() {
       const text = p.text.replace(/\s+/g, " ").slice(0, PREVIEW_TEXT_LENGTH);
       return `👤 ${author}${profile}\n${text}\n🔗 ${p.post_url}`;
     });
-    preview.textContent = [header, ...posts].join("\n\n");
+    const skipped = (result.skippedDetails ?? []).map((s, i) => {
+      const links = s.links.length ? `\n   посилання: ${s.links.join("  ")}` : "";
+      return `${i + 1}. ${SKIP_REASONS[s.reason] ?? s.reason}\n   «${s.preview || "порожній блок"}»${links}`;
+    });
+    const skippedBlock = skipped.length ? [`── Пропущено (${skipped.length}) ──`, ...skipped] : [];
+    preview.textContent = [header, ...posts, ...skippedBlock].join("\n\n");
   } catch (err) {
     preview.textContent = `Помилка розбору: ${err.message}`;
   }
