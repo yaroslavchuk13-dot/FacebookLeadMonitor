@@ -32,8 +32,13 @@ required
 needed
 wanted
 urgent*
-need
+# "need" сам по собі надто загальний ("You NEED this…" у рекламі) — лише у фразах:
 we need
+need a
+need an
+need 2
+need 3
+need 4
 looking for a
 looking for an
 is looking for
@@ -178,3 +183,13 @@ cscs course*
 cscs test*
 nvq course*
 training course*
+# Реклама послуг компаній (не вакансії). Лише фрази, яких не буває у вакансіях:
+# "we offer £25/h", "we provide accommodation", "book your start" — це вакансії, їх не додаємо.
+fire risk assessment*
+our services
+get a quote
+free quote
+quote today
+visit our website
+competitive prices
+special offer

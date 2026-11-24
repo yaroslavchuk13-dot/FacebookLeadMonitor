@@ -66,8 +66,8 @@ def _found_after(lead: dict[str, Any], posted_at: datetime) -> str:
     if saved_at.tzinfo is None:
         saved_at = saved_at.replace(tzinfo=posted_at.tzinfo)
     minutes = max(0, round((saved_at - posted_at).total_seconds() / 60))
-    if minutes > 24 * 60:
-        return ""  # an old post found by the catch-up round: the delay means nothing
+    if minutes > 60:
+        return ""  # an old post found by the catch-up round after a break: not the real speed
     return f" · знайдено через {minutes} хв" if minutes else " · знайдено одразу"
 
 

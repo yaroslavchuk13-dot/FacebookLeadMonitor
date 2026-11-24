@@ -32,6 +32,10 @@ NOT_LEADS = [
     "Let's welcome our new members to the group! Sean, Ihor, Julius",
     "DBS FIRE IS POORLY TODAY! One of them days where the body says NO",
     "Get your CSCS card fast — CSCS course in London, get registered today, £150",
+    # company advertising its services (real post, 24.11.2026)
+    "You NEED this know this before your next periodic Fire Risk Assessment\n- 02033 931661\n"
+    "Fire risk assessment London: escape routes, fire doors, alarm, emergency lighting",
+    "Fire door installation and fire stopping services in London. We offer free quote, call us today",
 ]
 
 
