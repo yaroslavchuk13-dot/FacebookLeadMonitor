@@ -1,6 +1,6 @@
 // Popup: monitor control and status, settings, parsing test.
 import { parseGroupId, parseGroupList } from "../lib/groups.js";
-import { catchUpProgress } from "../lib/scheduler.js";
+import { catchUpBudgetMs, catchUpProgress } from "../lib/scheduler.js";
 import { loadMonitor, loadOutbox, loadSettings, saveSettings } from "../lib/storage.js";
 
 const TEST_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
@@ -30,8 +30,6 @@ const formatTime = (ms) => new Date(ms).toLocaleTimeString("uk-UA");
 let currentMonitor = null;
 let outboxSize = 0;
 let currentGroupIds = [];
-// Rough time of a deep group visit incl. the pause before the next one.
-const DEEP_VISIT_SEC = 60;
 // A new post must reach Telegram within 3 minutes.
 const TARGET_SEC = 180;
 
@@ -82,8 +80,12 @@ function renderMonitor() {
   if (m.running && currentGroupIds.length) {
     const { done, total } = catchUpProgress(currentGroupIds, m.groupLastVisit);
     if (done < total) {
-      const minutes = Math.ceil(((total - done) * DEEP_VISIT_SEC) / 60);
-      lines.push(`🔄 Наздоганяю пропущене: ${done} з ${total} груп (≈ ${minutes} хв)`);
+      const perGroupSec = catchUpBudgetMs(total) / 1000 + 3; // + pause between groups
+      const minutes = Math.ceil(((total - done) * perGroupSec) / 60);
+      lines.push(
+        `🔄 Наздоганяю пропущене: ${done} з ${total} груп (≈ ${minutes} хв). ` +
+          "Далі — перевірка кожної групи щонайменше раз на 2,5 хв",
+      );
     } else {
       // Freshness guarantee: how long ago the least recently checked group was checked.
       const visits = currentGroupIds.map((id) => m.groupLastVisit?.[id] ?? 0);

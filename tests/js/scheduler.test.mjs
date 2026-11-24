@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   addToOutbox,
+  catchUpBudgetMs,
   catchUpProgress,
   needsDeepScan,
   pickBackupGroup,
@@ -96,11 +97,19 @@ test("a group saved by its name is matched through the alias", () => {
   assert.deepEqual(result.queue, ["firestoppersuk"]);
 });
 
-test("an overdue group goes before the catch-up of never visited groups", () => {
+test("catch-up first, then the overdue groups", () => {
   const now = Date.UTC(2026, 10, 25, 12, 0);
-  const visits = { a: now - 200_000, b: now - 10_000 };
-  assert.equal(pickNextGroup(["new1", "a", "b", "new2"], visits, now, 150_000), "a");
-  assert.equal(pickNextGroup(["new1", "b"], visits, now, 150_000), "new1"); // nothing overdue
+  const visits = { a: now - 200_000, b: now - 10_000, old: now - 5 * 60 * 60 * 1000 };
+  assert.equal(pickNextGroup(["a", "new1", "b"], visits, now, 150_000), "new1"); // never visited
+  assert.equal(pickNextGroup(["a", "old", "b"], visits, now, 150_000), "old"); // after a 5 h break
+  assert.equal(pickNextGroup(["a", "b"], visits, now, 150_000), "a"); // overdue
   assert.equal(pickNextGroup(["b"], visits, now, 150_000), null); // all fresh
   assert.equal(pickNextGroup(["a"], visits, now, 150_000, { a: now + 1 }), null); // failed: wait
+});
+
+test("catch-up budget: 10 minutes shared by the groups, 20-90 s each", () => {
+  assert.equal(catchUpBudgetMs(12), 50_000);
+  assert.equal(catchUpBudgetMs(10), 60_000);
+  assert.equal(catchUpBudgetMs(3), 90_000); // capped
+  assert.equal(catchUpBudgetMs(60), 20_000); // floor
 });

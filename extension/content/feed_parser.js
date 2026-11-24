@@ -318,6 +318,8 @@
    */
   async function parseFeed(options = {}) {
     const scrollSteps = Number.isInteger(options.scrollSteps) ? options.scrollSteps : SCROLL_STEPS;
+    // Catch-up round: scroll until the time budget of this group is used up.
+    const deadline = Number.isFinite(options.timeBudgetMs) ? Date.now() + options.timeBudgetMs : Infinity;
     const groupId = groupIdFromLocation();
     if (!groupId) return { status: "not_group", groupId: null, groupName: null, posts: [] };
 
@@ -328,7 +330,7 @@
     window.scrollTo({ top: 0 });
     for (let step = 0; step <= scrollSteps; step += 1) {
       await collectVisible(feed, groupId, state);
-      if (step === scrollSteps) break;
+      if (step === scrollSteps || Date.now() >= deadline) break;
       // Instant scroll: "smooth" does not move a tab that is not visible (the monitor tab).
       window.scrollBy(0, Math.round(window.innerHeight * 0.85));
       await sleep(randomBetween(SCROLL_PAUSE_MIN_MS, SCROLL_PAUSE_MAX_MS));

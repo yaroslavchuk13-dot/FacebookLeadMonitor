@@ -3,6 +3,7 @@
 import { groupFeedUrl } from "../lib/groups.js";
 import {
   addToOutbox,
+  catchUpBudgetMs,
   BACKUP_VISIT_MS,
   GROUP_TARGET_MS,
   DEEP_SCROLL_STEPS,
@@ -39,6 +40,8 @@ export const timing = {
   renderWaitMaxMs: 3500,
   emptyFeedRetryMs: 3000,
   // Continuous loop: a short pause between visits; every group is checked at least this often.
+  pageOverheadMs: 8000, // opening + rendering a group page (subtracted from the catch-up budget)
+  minParseBudgetMs: 10000,
   stepGapMinMs: 2000,
   stepGapMaxMs: 4000,
   groupTargetMs: GROUP_TARGET_MS,
@@ -277,7 +280,13 @@ async function visitAndDeliver(settings, monitor, groupId) {
   // After a break (night, PC off) the first visit scrolls deeper to catch up.
   const deep = needsDeepScan(monitor.groupLastVisit?.[groupId]);
   await updateMonitor({ currentVisit: { groupId, startedAt: Date.now(), deep }, nextRunAt: null });
-  const visit = await visitGroup(groupId, monitor.tabId, deep ? DEEP_SCROLL_STEPS : NORMAL_SCROLL_STEPS);
+  // Catch-up: the group's share of 10 minutes minus the time to open the page.
+  const budget = deep
+    ? Math.max(timing.minParseBudgetMs, catchUpBudgetMs(settings.groupIds.length) - timing.pageOverheadMs)
+    : null;
+  const visit = await visitGroup(
+    groupId, monitor.tabId, deep ? DEEP_SCROLL_STEPS : NORMAL_SCROLL_STEPS, budget,
+  );
 
   monitor = await loadMonitor();
   if (!monitor.running) return; // stopped by the user while we were visiting
@@ -383,14 +392,14 @@ async function deliver(settings, posts) {
 // --- visiting a group --------------------------------------------------------------
 
 /** Opens the group in the monitor tab and parses it. Returns { status, tabId, posts?, error? }. */
-async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS) {
+async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS, timeBudgetMs = null) {
   let tab;
   try {
     tab = await ensureTab(tabId);
     await navigateAndWait(tab.id, groupFeedUrl(groupId));
     await sleep(randomBetween(timing.renderWaitMinMs, timing.renderWaitMaxMs));
 
-    let result = await parseTab(tab.id, scrollSteps);
+    let result = await parseTab(tab.id, scrollSteps, timeBudgetMs);
     if (result.status === "ok" && result.posts.length === 0) {
       await sleep(timing.emptyFeedRetryMs); // feed may still be loading
       result = await parseTab(tab.id, NORMAL_SCROLL_STEPS);
@@ -483,16 +492,16 @@ function navigateAndWait(tabId, url) {
   });
 }
 
-async function parseTab(tabId, scrollSteps) {
+async function parseTab(tabId, scrollSteps, timeBudgetMs = null) {
   const target = { tabId };
   await chrome.scripting.executeScript({ target, files: CONTENT_SCRIPTS });
   const [{ result }] = await chrome.scripting.executeScript({
     target,
-    args: [scrollSteps],
-    func: async (steps) => {
+    args: [scrollSteps, timeBudgetMs],
+    func: async (steps, budget) => {
       const state = globalThis.FLM.pageState();
       if (state !== "ok") return { status: state, posts: [] };
-      return globalThis.FLM.parseFeed({ scrollSteps: steps });
+      return globalThis.FLM.parseFeed({ scrollSteps: steps, timeBudgetMs: budget ?? undefined });
     },
   });
   return result;

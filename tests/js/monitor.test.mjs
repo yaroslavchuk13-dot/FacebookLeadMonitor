@@ -377,11 +377,13 @@ test("first visit after a break scrolls deep, the next one is normal", async () 
   await runTick(); // never visited -> deep
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // backup round, 1 h later
   await runTick(); // -> normal
-  assert.deepEqual(fake.scriptArgs, [[25], [2]]);
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 2]);
+  assert.ok(fake.scriptArgs[0][1] > 0, "deep check has a time budget");
+  assert.equal(fake.scriptArgs[1][1], null, "normal check has none");
 
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 4 * 60 * 60 * 1000; // 4 h break
   await runTick();
-  assert.deepEqual(fake.scriptArgs.at(-1), [25]);
+  assert.equal(fake.scriptArgs.at(-1)[0], 60);
 });
 
 test("a failed visit is retried deep next time", async () => {
@@ -391,7 +393,7 @@ test("a failed visit is retried deep next time", async () => {
   fake.store.monitor.groupRetryAt.aaa = Date.now() - 1;
   fake.pageResult = okPage(post(1));
   await runTick();
-  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [25, 25]); // never succeeded -> deep again
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 60]); // never succeeded -> deep again
 });
 
 // --- Facebook notifications ------------------------------------------------------------------
@@ -488,14 +490,19 @@ test("a group saved by name learns its numeric id, then notifications find it", 
   });
 });
 
-test("catch-up does not delay an overdue group (3-minute goal holds during catch-up)", async () => {
+test("catch-up first (deep, 10 min / groups each), then the overdue groups (fast)", async () => {
   fake.store.settings.groupIds = ["never1", "aaa", "never2"];
   fake.store.monitor.groupLastVisit = { aaa: Date.now() - 200_000 };
   fake.pageResult = okPage(post(1));
   await runTick();
-  assert.equal(new URL(fake.navigations[0]).pathname, "/groups/aaa/");
-  assert.deepEqual(fake.scriptArgs[0], [2]); // fast check, not deep
   await runTick();
-  assert.equal(new URL(fake.navigations[1]).pathname, "/groups/never1/");
-  assert.deepEqual(fake.scriptArgs[1], [25]); // catch-up: deep
+  await runTick();
+  assert.deepEqual(visitedPathsAll(), ["/groups/never1/", "/groups/never2/", "/groups/aaa/"]);
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 60, 2]);
+  // 3 groups -> 10 min / 3 is capped at 90 s per group, minus the page opening time
+  assert.equal(fake.scriptArgs[0][1], 90_000 - 8_000);
 });
+
+function visitedPathsAll() {
+  return fake.navigations.map((u) => new URL(u).pathname);
+}

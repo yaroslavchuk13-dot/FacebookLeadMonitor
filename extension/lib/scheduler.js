@@ -32,25 +32,32 @@ export function pickBackupGroup(
 }
 
 /**
- * The next group of the continuous loop:
- *   1. an already visited group not checked for targetMs (the oldest first) — fast check,
- *      so the 3-minute goal holds even while the catch-up round is still running;
- *   2. a never visited group (catch-up after a break: deep check);
- *   3. null — all groups are fresh.
+ * The next group of the continuous loop. Two phases:
+ *   1. catch-up after a start / break: every group that needs a deep check, in list order
+ *      (each gets CATCHUP_TOTAL_MS / number of groups — 10 minutes for all of them);
+ *   2. normal work: a group not checked for targetMs (the oldest first), fast check;
+ *   null — all groups are fresh.
  */
 export function pickNextGroup(groupIds, lastVisits, now = Date.now(), targetMs = GROUP_TARGET_MS, retryAt = {}) {
   let overdue = null;
-  let neverVisited = null;
   for (const id of groupIds ?? []) {
     if (retryAt?.[id] > now) continue;
     const last = lastVisits?.[id];
-    if (!Number.isFinite(last)) {
-      neverVisited ??= id;
-    } else if (now - last >= targetMs && (overdue === null || last < lastVisits[overdue])) {
-      overdue = id;
-    }
+    if (needsDeepScan(last, now)) return id; // phase 1: catch-up
+    if (now - last >= targetMs && (overdue === null || last < lastVisits[overdue])) overdue = id;
   }
-  return overdue ?? neverVisited;
+  return overdue;
+}
+
+// Catch-up after a start / break: all groups are checked deeply within this time.
+export const CATCHUP_TOTAL_MS = 10 * 60 * 1000;
+const CATCHUP_MIN_PER_GROUP_MS = 20 * 1000;
+const CATCHUP_MAX_PER_GROUP_MS = 90 * 1000;
+
+/** Time for one group in the catch-up round: 10 min / number of groups, within 20-90 s. */
+export function catchUpBudgetMs(groupCount) {
+  const share = CATCHUP_TOTAL_MS / Math.max(1, groupCount);
+  return Math.round(Math.min(CATCHUP_MAX_PER_GROUP_MS, Math.max(CATCHUP_MIN_PER_GROUP_MS, share)));
 }
 
 /**
@@ -83,7 +90,7 @@ export const OUTBOX_LIMIT = 500;
 // How far a group visit scrolls. After a break (night, PC off) the first visit goes deeper
 // so posts published meanwhile are not missed.
 export const NORMAL_SCROLL_STEPS = 2; // ~5-8 newest posts: enough when every group is checked every 2-3 min
-export const DEEP_SCROLL_STEPS = 25; // ~40-50 posts
+export const DEEP_SCROLL_STEPS = 60; // upper limit; the catch-up time budget usually stops earlier
 export const DEEP_SCAN_AFTER_MS = 3 * 60 * 60 * 1000;
 
 /** True if the group was never visited or not for a long time. */
