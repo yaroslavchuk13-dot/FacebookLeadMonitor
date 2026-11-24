@@ -10,6 +10,7 @@ import {
   NORMAL_SCROLL_STEPS,
   NOTIFICATIONS_INTERVAL_MS,
   pickBackupGroup,
+  pickNextGroup,
   queueFromNotifications,
   SEEN_NOTIFICATIONS_LIMIT,
 } from "../lib/scheduler.js";
@@ -195,7 +196,10 @@ async function tick() {
   const pick = (targetMs) => pickBackupGroup(
     settings.groupIds, monitor.groupLastVisit, now, targetMs, monitor.groupRetryAt,
   );
-  const due = pick(timing.groupTargetMs);
+  // Overdue groups first (fast), then the catch-up of never visited ones (deep).
+  const due = pickNextGroup(
+    settings.groupIds, monitor.groupLastVisit, now, timing.groupTargetMs, monitor.groupRetryAt,
+  );
   if (due) {
     await visitAndDeliver(settings, monitor, due);
     return undefined;

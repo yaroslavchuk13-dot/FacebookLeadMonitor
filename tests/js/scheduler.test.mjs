@@ -7,6 +7,7 @@ import {
   catchUpProgress,
   needsDeepScan,
   pickBackupGroup,
+  pickNextGroup,
   queueFromNotifications,
   nextGroupIndex,
   PAUSE_MAX_SEC,
@@ -93,4 +94,13 @@ test("a group saved by its name is matched through the alias", () => {
   const items = [{ key: "k", groupId: "123456789" }];
   const result = queueFromNotifications(items, ["firestoppersuk"], [], [], 500, { 123456789: "firestoppersuk" });
   assert.deepEqual(result.queue, ["firestoppersuk"]);
+});
+
+test("an overdue group goes before the catch-up of never visited groups", () => {
+  const now = Date.UTC(2026, 10, 25, 12, 0);
+  const visits = { a: now - 200_000, b: now - 10_000 };
+  assert.equal(pickNextGroup(["new1", "a", "b", "new2"], visits, now, 150_000), "a");
+  assert.equal(pickNextGroup(["new1", "b"], visits, now, 150_000), "new1"); // nothing overdue
+  assert.equal(pickNextGroup(["b"], visits, now, 150_000), null); // all fresh
+  assert.equal(pickNextGroup(["a"], visits, now, 150_000, { a: now + 1 }), null); // failed: wait
 });

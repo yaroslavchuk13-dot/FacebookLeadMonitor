@@ -487,3 +487,15 @@ test("a group saved by name learns its numeric id, then notifications find it", 
     assert.deepEqual(visitedPaths().slice(-2), ["/notifications", "/groups/firestoppersuk/"]);
   });
 });
+
+test("catch-up does not delay an overdue group (3-minute goal holds during catch-up)", async () => {
+  fake.store.settings.groupIds = ["never1", "aaa", "never2"];
+  fake.store.monitor.groupLastVisit = { aaa: Date.now() - 200_000 };
+  fake.pageResult = okPage(post(1));
+  await runTick();
+  assert.equal(new URL(fake.navigations[0]).pathname, "/groups/aaa/");
+  assert.deepEqual(fake.scriptArgs[0], [2]); // fast check, not deep
+  await runTick();
+  assert.equal(new URL(fake.navigations[1]).pathname, "/groups/never1/");
+  assert.deepEqual(fake.scriptArgs[1], [25]); // catch-up: deep
+});

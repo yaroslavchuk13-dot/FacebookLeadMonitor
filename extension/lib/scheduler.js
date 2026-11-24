@@ -32,6 +32,28 @@ export function pickBackupGroup(
 }
 
 /**
+ * The next group of the continuous loop:
+ *   1. an already visited group not checked for targetMs (the oldest first) — fast check,
+ *      so the 3-minute goal holds even while the catch-up round is still running;
+ *   2. a never visited group (catch-up after a break: deep check);
+ *   3. null — all groups are fresh.
+ */
+export function pickNextGroup(groupIds, lastVisits, now = Date.now(), targetMs = GROUP_TARGET_MS, retryAt = {}) {
+  let overdue = null;
+  let neverVisited = null;
+  for (const id of groupIds ?? []) {
+    if (retryAt?.[id] > now) continue;
+    const last = lastVisits?.[id];
+    if (!Number.isFinite(last)) {
+      neverVisited ??= id;
+    } else if (now - last >= targetMs && (overdue === null || last < lastVisits[overdue])) {
+      overdue = id;
+    }
+  }
+  return overdue ?? neverVisited;
+}
+
+/**
  * New notifications -> groups to visit. Only groups from the settings; keys already seen are
  * skipped. Returns { queue, seen } (seen is capped, newest kept).
  */
