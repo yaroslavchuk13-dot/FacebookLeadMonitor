@@ -11,9 +11,13 @@
   const FOLLOWERS_RE = /(\d[\d,.]*\s?[KkКкMм]?)\s*(?:followers|підписник\w*|подписчик\w*)/i;
   const JOINED_RE =
     /(?:joined facebook in|joined|member since|приєднал\w* до facebook|на facebook з|присоединил\w* к facebook)[^\d\n]{0,20}((?:19|20)\d{2})/i;
-  const INTRO_HEADING_RE = /(?:^|\n)\s*(?:Intro|Інформація|Коротко|Информация)\s*(?:\n|$)/i;
+  // The profile info block: "Intro" (old layout) or "Personal details" / "Education" / "Work" (new).
+  const INTRO_HEADING_RE =
+    /(?:^|\n)\s*(?:Intro|Personal details|Education|Work|Інформація|Коротко|Особисті дані|Особисті відомості|Освіта|Робота|Информация|Личные данные|Образование|Работа)\s*(?:\n|$)/i;
   const INTRO_LINE_RE =
-    /^(?:lives in|from|works at|worked at|studied at|studies at|went to|goes to|married|in a relationship|single|живе в|з міста|родом з|працює|працював|навча\w*|живет в|из города|работает|работал|учил\w*|учится)\b/i;
+    /^(?:lives in|from|works at|worked at|studied at|studies at|went to|goes to|married|in a relationship|single|engaged|живе в|з міста|родом з|працює|працював|навча\w*|живет в|из города|работает|работал|учил\w*|учится)\b/i;
+  // "Education" lists schools as plain lines: count the line right after the heading as an item.
+  const EDUCATION_HEADING_RE = /^(?:Education|Освіта|Образование)$/i;
 
   /** "1.2K" -> 1200, "1,234" -> 1234, "350" -> 350. */
   function parseCount(raw) {
@@ -41,7 +45,12 @@
     const joined = body.match(JOINED_RE);
     let introItems = null;
     if (INTRO_HEADING_RE.test(body)) {
-      introItems = body.split("\n").filter((line) => INTRO_LINE_RE.test(line.trim())).length;
+      const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
+      introItems = lines.filter((line) => INTRO_LINE_RE.test(line)).length;
+      const educationAt = lines.findIndex((line) => EDUCATION_HEADING_RE.test(line));
+      if (educationAt >= 0 && lines[educationAt + 1] && !INTRO_LINE_RE.test(lines[educationAt + 1])) {
+        introItems += 1; // a school listed under "Education"
+      }
     }
     return {
       status: "ok",

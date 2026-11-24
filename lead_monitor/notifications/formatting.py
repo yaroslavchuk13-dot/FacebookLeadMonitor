@@ -118,7 +118,10 @@ def format_scam(lead: dict[str, Any]) -> list[str]:
         return ["🛡 🔴 <b>Схоже на скам</b>", *reasons_red]
     if level == "green":
         return ["🛡 🟢 Явних ознак скаму не знайдено", *[f"✓ {escape(g)}" for g in green][:MAX_SCAM_REASONS]]
-    return ["🛡 🟡 <b>Будьте уважні</b>", *(reasons_red or ["• Мало даних про автора"])]
+    found_green = [f"✓ {escape(g)}" for g in green][:MAX_SCAM_REASONS]
+    if not reasons_red:
+        reasons_red = ["• Мало даних про автора"]
+    return ["🛡 🟡 <b>Будьте уважні</b>", *reasons_red, *found_green]
 
 
 def lead_button_text(lead: dict[str, Any]) -> str:

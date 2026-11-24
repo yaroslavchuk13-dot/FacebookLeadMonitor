@@ -39,7 +39,9 @@ MONTHS = {
     7: ("jul", "лип", "июл"), 8: ("aug", "серп", "авг"), 9: ("sep", "верес", "сен"),
     10: ("oct", "жовт", "окт"), 11: ("nov", "листоп", "ноя"), 12: ("dec", "груд", "дек"),
 }
-_YEAR = r"(?:,?\s*(?P<year>\d{4}))?"
+_YEAR = r"(?:,?\s*(?P<year>\d{4})(?:\s*(?:р|г)\.?)?)?"
+# "Monday, 24 November 2026 at 13:40" (tooltip): the weekday in front of a full date is dropped
+LEADING_WEEKDAY_RE = re.compile(rf"^(?:{'|'.join(WEEKDAYS)})\s*,?\s+(?=\d|[^\W\d_]+\s+\d)", re.I)
 DAY_MONTH_RE = re.compile(rf"^(?P<d>\d{{1,2}})\s+(?P<month>[^\W\d_]+){_YEAR}{TIME_PART}$", re.I)
 MONTH_DAY_RE = re.compile(rf"^(?P<month>[^\W\d_]+)\s+(?P<d>\d{{1,2}}){_YEAR}{TIME_PART}$", re.I)
 
@@ -89,6 +91,7 @@ def parse_posted_text(text: str | None, now: datetime) -> datetime | None:
         days_back = (now.weekday() - WEEKDAYS[m.group("day").lower()]) % 7 or 7
         return _clock(m, now - timedelta(days=days_back))
 
+    value = LEADING_WEEKDAY_RE.sub("", value)
     for rx in (DAY_MONTH_RE, MONTH_DAY_RE):
         m = rx.match(value)
         month = _month(m.group("month")) if m else None

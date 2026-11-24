@@ -20,6 +20,7 @@ VOWELS = set("aeiouyаеєиіїоуюяёэы")
 @dataclass(frozen=True)
 class ScamRules:
     red_for_scam: int = 2
+    green_min: int = 3  # 🟢 needs no red signs and at least this many green ones
     max_realistic_hourly: float = 45
     max_realistic_daily: float = 400
     min_friends: int = 20
@@ -166,15 +167,11 @@ def profile_signs(profile: ProfileSignals, rules: ScamRules, now_year: int | Non
 
 # --- verdict ------------------------------------------------------------------------------------
 
-# Criteria that can give a sign; "most green" is counted against this number.
-TOTAL_CRITERIA = 6
-
-
 def verdict(signs: Signs, rules: ScamRules, profile_checked: bool) -> ScamLevel:
     if len(signs.red) >= rules.red_for_scam:
         return ScamLevel.RED
     if signs.red:
         return ScamLevel.YELLOW
-    if profile_checked and len(signs.green) * 2 > TOTAL_CRITERIA:
+    if profile_checked and len(signs.green) >= rules.green_min:
         return ScamLevel.GREEN
-    return ScamLevel.YELLOW  # mixed or too little data
+    return ScamLevel.YELLOW  # too little data

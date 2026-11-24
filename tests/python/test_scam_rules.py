@@ -83,3 +83,18 @@ def test_verdict_levels() -> None:
     assert verdict(Signs(green=["1", "2", "3", "4"]), RULES, True) is ScamLevel.GREEN
     assert verdict(Signs(green=["1", "2"]), RULES, True) is ScamLevel.YELLOW  # too little data
     assert verdict(Signs(green=["1", "2", "3", "4"]), RULES, False) is ScamLevel.YELLOW  # profile not checked
+
+
+def test_real_profile_cristina_is_green() -> None:
+    """1.5K friends, photo, lives in London + from + school, realistic pay (24.11.2026)."""
+    profile = ProfileSignals(has_photo=True, friends=1500, intro_items=3)
+    signs = text_signs("Need a cscs cleaner to start tomorrow in RG6\n140£ per day, we pay cis", RULES)
+    signs = signs + author_signs("Cristina Iza", "https://www.facebook.com/profile.php?id=100075533280189")
+    signs = signs + profile_signs(profile, RULES)
+    assert signs.red == []
+    assert verdict(signs, RULES, profile_checked=True) is ScamLevel.GREEN
+
+
+def test_three_greens_needed() -> None:
+    assert verdict(Signs(green=["a", "b", "c"]), RULES, True) is ScamLevel.GREEN
+    assert verdict(Signs(green=["a", "b"]), RULES, True) is ScamLevel.YELLOW

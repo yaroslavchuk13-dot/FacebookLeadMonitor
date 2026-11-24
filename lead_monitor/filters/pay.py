@@ -17,6 +17,8 @@ _UNIT_RX = "|".join(f"(?P<{name}>{rx})" for name, rx in UNIT_WORDS.items())
 _AMOUNT = r"(?P<amount>\d{1,4}(?:[.,]\d{1,2})?)"
 # "£27.50 per hour", "£25/h", "£250 a day", "£ 220/day"
 POUND_RX = re.compile(rf"£\s?{_AMOUNT}(?:\s*(?:-|to|–)\s*£?\s?(?P<amount2>\d{{1,4}}(?:[.,]\d{{1,2}})?))?\s*(?:{_UNIT_RX})?(?!\w)", re.I)
+# "140£ per day" (pound sign after the number)
+POUND_AFTER_RX = re.compile(rf"(?<![\d.,£]){_AMOUNT}\s?£\s*(?:{_UNIT_RX})?(?!\w)", re.I)
 # "27.50 per hour", "250 per day" (no £ sign): only explicit units, so "10 hour days" is not pay
 _PLAIN_UNITS = {
     "hour": r"(?:per\s*hour|p/h|/\s*hr?|an\s*hour|ph)",
@@ -59,7 +61,7 @@ def extract_pay(text: str) -> list[Pay]:
     """All pay amounts found in the text, in order, without duplicates."""
     found: list[Pay] = []
     taken: list[range] = []
-    for rx in (POUND_RX, PLAIN_RX):
+    for rx in (POUND_RX, POUND_AFTER_RX, PLAIN_RX):
         for m in rx.finditer(text):
             if any(m.start() in span for span in taken):
                 continue

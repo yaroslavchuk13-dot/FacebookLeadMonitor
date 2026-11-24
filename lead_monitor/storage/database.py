@@ -73,6 +73,10 @@ MIGRATIONS: list[str] = [
         checked_at  TEXT NOT NULL
     );
     """,
+    # 4: profile parsing was fixed (new "Personal details" layout) — re-check cached authors.
+    """
+    DELETE FROM author_profiles;
+    """,
 ]
 
 # Columns returned for a lead (Telegram notifier, statistics).

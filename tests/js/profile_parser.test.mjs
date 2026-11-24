@@ -60,3 +60,22 @@ test("unknown avatar url -> photo unknown", () => {
   assert.equal(extractProfileSignals("Ivan\n300 friends", null).has_photo, null);
   assert.equal(extractProfileSignals("Ivan\n300 friends", "https://example.com/x.png").has_photo, null);
 });
+
+test("new layout: 'Personal details' and 'Education' (real profile from 24.11.2026)", () => {
+  const text = [
+    "Cristina Iza",
+    "1.5K friends",
+    "London · C.N.E.T. - Colegiul Național",
+    "All", "About", "Friends", "Photos", "Reels", "More",
+    "Personal details",
+    "Lives in London, United Kingdom",
+    "From Târgu Jiu",
+    "Education",
+    "C.N.E.T. - Colegiul Național \"Ecaterina Teodoroiu\" Târgu Jiu",
+    "Posts",
+  ].join("\n");
+  const s = extractProfileSignals(text, PHOTO);
+  assert.equal(s.friends, 1500);
+  assert.equal(s.intro_items, 3);
+  assert.equal(s.has_photo, true);
+});

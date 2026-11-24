@@ -43,3 +43,8 @@ def test_shift_hours() -> None:
     assert shift_hours("2 hours notice") is None
     assert shift_hours("3 hours away") is None
     assert shift_hours("nothing") is None
+
+
+def test_pound_sign_after_number() -> None:
+    assert describe_pay("Need a cscs cleaner\n140£ per day, we pay cis") == "£140/день"
+    assert describe_pay("25£/h") == "£25/год (≈ £200 за 8-год день)"

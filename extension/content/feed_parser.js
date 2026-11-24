@@ -91,28 +91,81 @@
     return null;
   }
 
-  // "4h", "5 days ago", "Yesterday at 10:15", "21 November at 14:00", "Щойно", "Вчера в 10:15"
-  const TIME_HINT_RE = /\d|just now|yesterday|today|щойно|вчора|сьогодні|только что|вчера|сегодня/i;
-  const MAX_TIME_TEXT = 60;
+  // Real timestamp texts only (Facebook may scramble the visible text, e.g. "4Sozq"):
+  // "4h", "5 days ago", "Yesterday at 10:15", "21 November at 14:00", "Щойно", "Вчера в 10:15",
+  // "Monday, 24 November 2026 at 13:40".
+  const TIME_HINT_RE = new RegExp(
+    [
+      "^(?:just now|now|щойно|только что|зараз)$",
+      "^\\d{1,2}\\s?(?:s|m|h|d|w|y|secs?|mins?|minutes?|hrs?|hours?|days?|weeks?|wks?|mo|months?|years?|yrs?|" +
+        "сек\\w*|хв\\w*|мин\\w*|год\\w*|ч|час\\w*|дн\\w*|д|тиж\\w*|нед\\w*|міс\\w*|мес\\w*)\\.?(?:\\s+(?:ago|тому|назад))?$",
+      "^(?:an?|one)\\s+(?:minute|hour|day|week|month|year)s?\\s+ago$",
+      "\\b(?:yesterday|today|вчора|вчера|сьогодні|сегодня)\\b",
+      "\\b(?:at|о|об|в)\\s+\\d{1,2}[:.]\\d{2}",
+      "\\b\\d{1,2}\\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|січ|лют|бер|квіт|трав|черв|лип|серп|верес|жовт|листоп|груд|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)",
+      "\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\w*\\s+\\d{1,2}\\b",
+    ].join("|"),
+    "i",
+  );
+  const MAX_TIME_TEXT = 80;
+  const TOOLTIP_WAIT_MS = 700;
+
+  /** Text of elements referenced by aria-labelledby (Facebook keeps the full date there). */
+  function labelledByText(el) {
+    const ids = el.getAttribute("aria-labelledby");
+    if (!ids) return "";
+    return ids.split(/\s+/).map((id) => document.getElementById(id)?.innerText ?? "").join(" ");
+  }
+
+  /** Every place where a timestamp element may keep its text. */
+  function timeTextCandidates(el) {
+    return [
+      el.getAttribute("aria-label"),
+      el.getAttribute("title"),
+      labelledByText(el),
+      el.querySelector("abbr[title]")?.getAttribute("title"),
+      el.innerText,
+    ]
+      .map((t) => cleanText(t).split("\n")[0])
+      .filter(Boolean);
+  }
 
   function timeLabel(el) {
-    const text = cleanText(el.getAttribute("aria-label") || el.innerText).split("\n")[0];
-    return text && text.length <= MAX_TIME_TEXT && TIME_HINT_RE.test(text) ? text : null;
+    return timeTextCandidates(el).find((t) => t.length <= MAX_TIME_TEXT && TIME_HINT_RE.test(t)) ?? null;
+  }
+
+  const postLinkElements = (post, groupId) =>
+    own(post, "a[href]").filter((a) => canonicalPostUrl(a.getAttribute("href"), groupId));
+
+  /** Hovers the timestamp and reads the tooltip Facebook shows ("Monday, 24 November 2026 at 13:40"). */
+  async function tooltipTime(el) {
+    hover(el);
+    await sleep(TOOLTIP_WAIT_MS);
+    const tip = [...document.querySelectorAll('[role="tooltip"]')]
+      .map((t) => cleanText(t.innerText).split("\n")[0])
+      .find((t) => t.length <= MAX_TIME_TEXT && TIME_HINT_RE.test(t));
+    unhover(el);
+    return tip ?? null;
   }
 
   /** Text of the post's timestamp (parsed into a date by the server), or null. */
-  function findPostedText(post, groupId) {
+  async function findPostedText(post, groupId) {
     // The timestamp is the link that points to the post itself.
-    for (const a of own(post, "a[href]")) {
-      if (!canonicalPostUrl(a.getAttribute("href"), groupId)) continue;
+    const links = postLinkElements(post, groupId);
+    for (const a of links) {
       const text = timeLabel(a);
       if (text) return text;
     }
-    // Otherwise: a link-like element with a time-like label (href not revealed yet).
+    // A link-like element with a time-like label (href not revealed yet).
     for (const el of own(post, '[aria-label], a, [role="link"]')) {
       if (canonicalProfileUrl(el.getAttribute("href"))) continue; // author name
       const text = timeLabel(el);
       if (text && !/\b(?:comment|like|share|reply)/i.test(text)) return text;
+    }
+    // Visible text is scrambled: read the tooltip of the timestamp link.
+    for (const a of links.slice(0, 2)) {
+      const text = await tooltipTime(a);
+      if (text) return text;
     }
     return null;
   }
@@ -133,21 +186,26 @@
    * Facebook fills the timestamp link's href only on mouse hover.
    * Simulate hover on candidate links, then read again.
    */
+  function hover(el) {
+    for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter"]) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("over"), view: window }));
+    }
+    el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  }
+
+  function unhover(el) {
+    for (const type of ["pointerout", "pointerleave", "mouseout", "mouseleave"]) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("out"), view: window }));
+    }
+    el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  }
+
   async function revealLazyLinks(posts) {
     const touched = posts.flatMap(hoverCandidates);
     if (!touched.length) return;
-    for (const el of touched) {
-      for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter"]) {
-        el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("over"), view: window }));
-      }
-      el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    }
+    touched.forEach(hover);
     await sleep(HOVER_WAIT_MS);
-    for (const el of touched) {
-      for (const type of ["pointerout", "pointerleave", "mouseout", "mouseleave"]) {
-        el.dispatchEvent(new MouseEvent(type, { bubbles: type.endsWith("out"), view: window }));
-      }
-    }
+    touched.forEach(unhover);
   }
 
   function findAuthor(post) {
@@ -228,7 +286,7 @@
         group_name: groupName(),
         post_url: postUrl,
         link_found: Boolean(realUrl), // for the popup only; the server ignores it
-        posted_text: findPostedText(root, groupId),
+        posted_text: await findPostedText(root, groupId),
         author_name: author.name,
         author_profile_url: author.url,
         text,
@@ -290,6 +348,12 @@
         const label = el.hasAttribute("aria-label") ? "+L" : "";
         return `${tag}${linkShape(el.getAttribute("href"))}${label}`;
       }))].slice(0, 10).join(" ");
+      // Where the timestamp keeps its text: aria-label | title | aria-labelledby | abbr | visible text.
+      const timeEl = postLinkElements(root, groupId)[0];
+      const timeDiag = timeEl
+        ? `${timeEl.hasAttribute("aria-labelledby") ? "labelledby " : ""}` +
+          timeTextCandidates(timeEl).map((t) => JSON.stringify(t.slice(0, 40))).join(" | ")
+        : "no post link";
       lines.push(
         `#${i} textLen=${(unit.innerText ?? "").trim().length}` +
           ` root=${root === unit ? "unit" : "article"}` +
@@ -298,7 +362,8 @@
           ` posinset=${unit.querySelector("[aria-posinset]") ? "y" : "n"}` +
           ` postLinks=${postLinks} hash=${hashLinks} ownText=${findText(root).length}` +
           ` author=${findAuthor(root).url ? "link" : findAuthor(root).name ? "name" : "none"}` +
-          ` links=[${linkShapes}]`,
+          ` links=[${linkShapes}]` +
+          ` time=[${timeDiag}]`,
       );
     });
     return lines.join("\n");

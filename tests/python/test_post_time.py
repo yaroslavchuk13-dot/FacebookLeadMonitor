@@ -59,3 +59,21 @@ def test_describe_age() -> None:
     assert describe_age(NOW - timedelta(minutes=5), NOW) == "5 хв тому (24.11 17:35)"
     assert describe_age(NOW - timedelta(hours=4), NOW) == "4 год тому (24.11 13:40)"
     assert describe_age(NOW - timedelta(days=2), NOW) == "2 дн тому (22.11 17:40)"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Monday, 24 November 2026 at 13:40",
+        "Monday 24 November 2026 at 13:40",
+        "Monday, November 24, 2026 at 1:40 PM",
+        "понеділок, 24 листопада 2026 р. о 13:40",
+        "понедельник, 24 ноября 2026 г. в 13:40",
+    ],
+)
+def test_tooltip_full_dates(text: str) -> None:
+    assert parse_posted_text(text, NOW) == datetime(2026, 11, 24, 13, 40, tzinfo=UTC)
+
+
+def test_weekday_with_time_is_still_relative() -> None:
+    assert parse_posted_text("Monday at 14:00", NOW) == datetime(2026, 11, 23, 14, 0, tzinfo=UTC)

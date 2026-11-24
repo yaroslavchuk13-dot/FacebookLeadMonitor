@@ -193,6 +193,42 @@ async function onParseTab() {
   }
 }
 
+const yesNo = (value) => (value === true ? "так" : value === false ? "ні" : "невідомо");
+
+/** Shows what the scam check reads from the open author profile. */
+async function onParseProfile() {
+  const preview = $("preview");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/^https:\/\/www\.facebook\.com\//.test(tab.url) || parseGroupId(tab.url) !== null) {
+    preview.textContent = "Відкрийте профіль автора у Facebook (не групу) і натисніть ще раз.";
+    return;
+  }
+  try {
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: ["content/profile_parser.js"] });
+    const [{ result: p }] = await chrome.scripting.executeScript({
+      target,
+      func: () => globalThis.FLM.parseProfile(),
+    });
+    if (p.status !== "ok") {
+      preview.textContent = "Профіль недоступний або сторінка ще не завантажилась.";
+      return;
+    }
+    preview.textContent = [
+      "Що бачить перевірка на скам:",
+      `Фото профілю: ${yesNo(p.has_photo)}`,
+      `Друзів: ${p.friends ?? "невідомо"}`,
+      `Підписників: ${p.followers ?? "невідомо"}`,
+      `Рік реєстрації: ${p.joined_year ?? "невідомо"}`,
+      `Пунктів у «Personal details»: ${p.intro_items ?? "невідомо"}`,
+      `Профіль закритий: ${yesNo(p.is_locked)}`,
+      `Бізнес-сторінка: ${yesNo(p.is_page)}`,
+    ].join("\n");
+  } catch (err) {
+    preview.textContent = `Помилка: ${err.message}`;
+  }
+}
+
 /** Copies a structure-only report of the open group page (no names / post text). */
 async function onDiagnoseTab() {
   const preview = $("preview");
@@ -230,6 +266,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("check").addEventListener("click", onCheck);
   $("parse-tab").addEventListener("click", onParseTab);
   $("diagnose-tab").addEventListener("click", onDiagnoseTab);
+  $("parse-profile").addEventListener("click", onParseProfile);
 
   await refreshMonitor();
   chrome.storage.onChanged.addListener((changes, area) => {
