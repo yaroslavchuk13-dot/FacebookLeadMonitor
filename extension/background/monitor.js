@@ -1,7 +1,14 @@
 // Monitor loop: visits one group per tick, sends new posts, then schedules the next tick.
 // Stops completely on a checkpoint / login page — no attempts to bypass it.
 import { groupFeedUrl } from "../lib/groups.js";
-import { addToOutbox, nextGroupIndex, randomPauseSec } from "../lib/scheduler.js";
+import {
+  addToOutbox,
+  DEEP_SCROLL_STEPS,
+  needsDeepScan,
+  nextGroupIndex,
+  NORMAL_SCROLL_STEPS,
+  randomPauseSec,
+} from "../lib/scheduler.js";
 import {
   loadMonitor,
   loadOutbox,
@@ -143,8 +150,10 @@ async function tick() {
 
   const index = nextGroupIndex(settings.groupIds.length, monitor.lastIndex);
   const groupId = settings.groupIds[index];
-  await updateMonitor({ currentVisit: { groupId, startedAt: Date.now() }, nextRunAt: null });
-  const visit = await visitGroup(groupId, monitor.tabId);
+  // After a break (night, PC off) the first visit scrolls deeper to catch up.
+  const deep = needsDeepScan(monitor.groupLastVisit?.[groupId]);
+  await updateMonitor({ currentVisit: { groupId, startedAt: Date.now(), deep }, nextRunAt: null });
+  const visit = await visitGroup(groupId, monitor.tabId, deep ? DEEP_SCROLL_STEPS : NORMAL_SCROLL_STEPS);
 
   monitor = await loadMonitor();
   if (!monitor.running) return; // stopped by the user while we were visiting
@@ -163,8 +172,10 @@ async function tick() {
   }
 
   const failures = { ...monitor.groupFailures };
+  const lastVisits = { ...monitor.groupLastVisit };
   if (visit.status === "ok") {
     delete failures[groupId];
+    lastVisits[groupId] = Date.now();
   } else {
     failures[groupId] = (failures[groupId] ?? 0) + 1;
     if (failures[groupId] === 1) {
@@ -181,6 +192,7 @@ async function tick() {
     tabId: visit.tabId,
     lastIndex: index,
     groupFailures: failures,
+    groupLastVisit: lastVisits,
     currentVisit: null,
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),
@@ -253,17 +265,17 @@ async function scheduleNext() {
 // --- visiting a group --------------------------------------------------------------
 
 /** Opens the group in the monitor tab and parses it. Returns { status, tabId, posts?, error? }. */
-async function visitGroup(groupId, tabId) {
+async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS) {
   let tab;
   try {
     tab = await ensureTab(tabId);
     await navigateAndWait(tab.id, groupFeedUrl(groupId));
     await sleep(randomBetween(timing.renderWaitMinMs, timing.renderWaitMaxMs));
 
-    let result = await parseTab(tab.id);
+    let result = await parseTab(tab.id, scrollSteps);
     if (result.status === "ok" && result.posts.length === 0) {
       await sleep(timing.emptyFeedRetryMs); // feed may still be loading
-      result = await parseTab(tab.id);
+      result = await parseTab(tab.id, NORMAL_SCROLL_STEPS);
     }
     return { ...result, tabId: tab.id };
   } catch (err) {
@@ -330,15 +342,16 @@ function navigateAndWait(tabId, url) {
   });
 }
 
-async function parseTab(tabId) {
+async function parseTab(tabId, scrollSteps) {
   const target = { tabId };
   await chrome.scripting.executeScript({ target, files: CONTENT_SCRIPTS });
   const [{ result }] = await chrome.scripting.executeScript({
     target,
-    func: async () => {
+    args: [scrollSteps],
+    func: async (steps) => {
       const state = globalThis.FLM.pageState();
       if (state !== "ok") return { status: state, posts: [] };
-      return globalThis.FLM.parseFeed();
+      return globalThis.FLM.parseFeed({ scrollSteps: steps });
     },
   });
   return result;

@@ -203,7 +203,7 @@ class Database:
     # --- Telegram delivery ------------------------------------------------------------
 
     def pending_leads(
-        self, max_age_hours: int = 24, limit: int = 20, scam_grace_seconds: int = 120
+        self, max_age_hours: int = 48, limit: int = 20, scam_grace_seconds: int = 120
     ) -> list[dict[str, Any]]:
         """Leads not yet sent to Telegram (oldest first). Older ones are not worth sending.
 

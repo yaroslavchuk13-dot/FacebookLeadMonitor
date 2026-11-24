@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/monitor.db")
     keywords_path: Path = Path("config/keywords.txt")
     # Leads published earlier than this are saved but not sent to Telegram.
-    lead_max_age_hours: int = Field(default=24, ge=1, le=24 * 30)
+    lead_max_age_hours: int = Field(default=48, ge=1, le=24 * 30)
     log_dir: Path = Path("logs")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 

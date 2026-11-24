@@ -1,5 +1,6 @@
 // Popup: monitor control and status, settings, parsing test.
 import { parseGroupId, parseGroupList } from "../lib/groups.js";
+import { catchUpProgress } from "../lib/scheduler.js";
 import { loadMonitor, loadOutbox, loadSettings, saveSettings } from "../lib/storage.js";
 
 const TEST_SCRIPTS = ["content/post_links.js", "content/feed_parser.js"];
@@ -28,6 +29,10 @@ const formatTime = (ms) => new Date(ms).toLocaleTimeString("uk-UA");
 
 let currentMonitor = null;
 let outboxSize = 0;
+let currentGroupIds = [];
+// Rough time of one group visit incl. the pause before the next one.
+const NORMAL_VISIT_SEC = 75;
+const DEEP_VISIT_SEC = 110;
 
 function renderMonitor() {
   const m = currentMonitor;
@@ -52,13 +57,23 @@ function renderMonitor() {
       const sec = Math.round((Date.now() - m.currentVisit.startedAt) / 1000);
       const what = m.currentVisit.groupId === "профіль автора"
         ? "профіль автора (перевірка на скам)"
-        : `групу ${m.currentVisit.groupId}`;
+        : `групу ${m.currentVisit.groupId}${m.currentVisit.deep ? " (глибоко, після перерви)" : ""}`;
       lines.push(`⏳ Перевіряю ${what}… (${sec} с)`);
     } else if (m.nextRunAt) {
       const sec = Math.max(0, Math.round((m.nextRunAt - Date.now()) / 1000));
       lines.push(`Наступна перевірка через ${sec} с`);
     } else {
       lines.push("Відновлюю цикл… (до 1 хв)");
+    }
+  }
+  if (m.running && currentGroupIds.length) {
+    const { done, total } = catchUpProgress(currentGroupIds, m.groupLastVisit);
+    if (done < total) {
+      const minutes = Math.ceil(((total - done) * DEEP_VISIT_SEC) / 60);
+      lines.push(`🔄 Наздоганяю пропущене: ${done} з ${total} груп (≈ ${minutes} хв)`);
+    } else {
+      const cycle = Math.ceil((total * NORMAL_VISIT_SEC) / 60);
+      lines.push(`✅ Усі групи наздогнано. Коло: ≈ ${cycle} хв`);
     }
   }
   lines.push(`Усього надіслано: ${m.postsSent}`);
@@ -111,6 +126,7 @@ async function onSave() {
   if (errors.length) return showMessage("status", errors.join("\n"), "error");
   await saveSettings(settings);
   fillForm(settings); // show the normalized list
+  currentGroupIds = settings.groupIds;
   showMessage("status", `Збережено. Груп: ${settings.groupIds.length}.`, "ok");
 }
 
@@ -204,6 +220,7 @@ async function onDiagnoseTab() {
 document.addEventListener("DOMContentLoaded", async () => {
   const settings = await loadSettings();
   fillForm(settings);
+  currentGroupIds = settings.groupIds;
   // Open settings automatically until the extension is configured.
   $("settings-section").open = !settings.token || !settings.groupIds.length;
 

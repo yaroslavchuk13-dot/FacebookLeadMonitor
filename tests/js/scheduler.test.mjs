@@ -4,6 +4,8 @@ import { test } from "node:test";
 
 import {
   addToOutbox,
+  catchUpProgress,
+  needsDeepScan,
   nextGroupIndex,
   PAUSE_MAX_SEC,
   PAUSE_MIN_SEC,
@@ -46,4 +48,14 @@ test("page classification", () => {
   assert.equal(classifyPage({ path: "/login/?next=x" }), "login_required");
   assert.equal(classifyPage({ path: "/groups/1/", hasPasswordField: true }), "login_required");
   assert.equal(classifyPage({}), "ok");
+});
+
+test("deep scan after a break of more than 3 hours", () => {
+  const now = Date.UTC(2026, 10, 25, 9, 0);
+  assert.equal(needsDeepScan(undefined, now), true);
+  assert.equal(needsDeepScan(now - 60 * 60 * 1000, now), false);
+  assert.equal(needsDeepScan(now - 10 * 60 * 60 * 1000, now), true);
+  const visits = { a: now - 1000, b: now - 10 * 60 * 60 * 1000 };
+  assert.deepEqual(catchUpProgress(["a", "b", "c"], visits, now), { done: 1, total: 3 });
+  assert.deepEqual(catchUpProgress([], undefined, now), { done: 0, total: 0 });
 });

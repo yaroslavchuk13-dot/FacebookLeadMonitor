@@ -55,7 +55,11 @@ globalThis.chrome = {
     },
   },
   scripting: {
-    executeScript: async ({ func }) => (func ? [{ result: structuredClone(fake.pageResult) }] : []),
+    executeScript: async ({ func, args }) => {
+      if (!func) return [];
+      fake.scriptArgs.push(args ?? []);
+      return [{ result: structuredClone(fake.pageResult) }];
+    },
   },
   action: {
     setBadgeText: async ({ text }) => {
@@ -120,6 +124,7 @@ beforeEach(() => {
     serverUp: true,
     paused: false,
     profileCheck: null,
+    scriptArgs: [],
   });
 });
 
@@ -344,4 +349,28 @@ test("a profile url outside facebook.com is ignored", async () => {
   fake.profileCheck = { id: 10, profile_url: "https://evil.example.com/x" };
   await runTick();
   assert.equal(new URL(fake.navigations[0]).pathname, "/groups/aaa/");
+});
+
+// --- deep scan after a break ------------------------------------------------------------------
+
+test("first visit after a break scrolls deep, the next one is normal", async () => {
+  fake.store.settings.groupIds = ["aaa"];
+  fake.pageResult = okPage(post(1)); // non-empty feed: no "empty feed" retry
+  await runTick(); // never visited -> deep
+  await runTick(); // visited a moment ago -> normal
+  assert.deepEqual(fake.scriptArgs, [[25], [6]]);
+  assert.ok(monitor().groupLastVisit.aaa > Date.now() - 5000);
+
+  fake.store.monitor.groupLastVisit.aaa = Date.now() - 4 * 60 * 60 * 1000; // 4 h break
+  await runTick();
+  assert.deepEqual(fake.scriptArgs.at(-1), [25]);
+});
+
+test("a failed visit is retried deep next time", async () => {
+  fake.store.settings.groupIds = ["aaa"];
+  fake.pageResult = { status: "no_feed", posts: [] };
+  await runTick();
+  fake.pageResult = okPage(post(1));
+  await runTick();
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [25, 25]);
 });

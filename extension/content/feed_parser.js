@@ -240,7 +240,8 @@
    * Returns { status, groupId, groupName, posts, expanded }.
    * status: "ok" | "not_group" | "no_feed". Posts match the server's FacebookPost model.
    */
-  async function parseFeed() {
+  async function parseFeed(options = {}) {
+    const scrollSteps = Number.isInteger(options.scrollSteps) ? options.scrollSteps : SCROLL_STEPS;
     const groupId = groupIdFromLocation();
     if (!groupId) return { status: "not_group", groupId: null, groupName: null, posts: [] };
 
@@ -249,9 +250,9 @@
 
     const state = { found: new Map(), done: new WeakSet(), expanded: { originals: 0, seeMore: 0 } };
     window.scrollTo({ top: 0 });
-    for (let step = 0; step <= SCROLL_STEPS; step += 1) {
+    for (let step = 0; step <= scrollSteps; step += 1) {
       await collectVisible(feed, groupId, state);
-      if (step === SCROLL_STEPS) break;
+      if (step === scrollSteps) break;
       // Instant scroll: "smooth" does not move a tab that is not visible (the monitor tab).
       window.scrollBy(0, Math.round(window.innerHeight * 0.85));
       await sleep(randomBetween(SCROLL_PAUSE_MIN_MS, SCROLL_PAUSE_MAX_MS));

@@ -15,7 +15,7 @@ max_realistic_hourly = 45
 max_realistic_daily = 400
 
 [profile]
-min_friends = 20          # менше — червона ознака
+min_friends = 10        # менше — червона ознака
 good_friends = 100        # стільки й більше — зелена
 new_account_years = 1     # акаунт молодший — червона ознака
 old_account_years = 3     # акаунт старший — зелена

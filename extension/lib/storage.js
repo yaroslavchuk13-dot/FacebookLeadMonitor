@@ -10,6 +10,7 @@ export const DEFAULT_MONITOR = {
   lastRun: null, // { groupId, at, status, found, sent, error }
   postsSent: 0,
   groupFailures: {}, // groupId -> consecutive failures (to avoid repeated alerts)
+  groupLastVisit: {}, // groupId -> ms of the last successful visit (deep scan after a break)
   alert: null, // { kind, message, at } — shown in the popup until the next start
 };
 
