@@ -31,7 +31,9 @@ let currentMonitor = null;
 let outboxSize = 0;
 let currentGroupIds = [];
 // Rough time of a deep group visit incl. the pause before the next one.
-const DEEP_VISIT_SEC = 110;
+const DEEP_VISIT_SEC = 60;
+// A new post must reach Telegram within 3 minutes.
+const TARGET_SEC = 180;
 
 function renderMonitor() {
   const m = currentMonitor;
@@ -82,7 +84,14 @@ function renderMonitor() {
       const minutes = Math.ceil(((total - done) * DEEP_VISIT_SEC) / 60);
       lines.push(`🔄 Наздоганяю пропущене: ${done} з ${total} груп (≈ ${minutes} хв)`);
     } else {
-      lines.push("✅ Усі групи наздогнано. Нові дописи — через сповіщення, запасна перевірка щогодини");
+      // Freshness guarantee: how long ago the least recently checked group was checked.
+      const visits = currentGroupIds.map((id) => m.groupLastVisit?.[id] ?? 0);
+      const oldestSec = Math.round((Date.now() - Math.min(...visits)) / 1000);
+      const ok = oldestSec <= TARGET_SEC;
+      lines.push(
+        `${ok ? "✅" : "⚠"} Усі ${total} груп перевірені за останні ${oldestSec} с ` +
+          `(ціль — до ${TARGET_SEC} с)`,
+      );
     }
   }
   lines.push(`Усього надіслано: ${m.postsSent}`);

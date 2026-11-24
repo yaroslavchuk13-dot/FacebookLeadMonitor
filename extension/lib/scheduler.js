@@ -4,9 +4,13 @@
 export const PAUSE_MIN_SEC = 30;
 export const PAUSE_MAX_SEC = 40;
 
-// Facebook notifications ("X posted in Group Y") are checked this often; a group with a new
-// post is visited right after. Every group is also visited as a backup this often.
-export const NOTIFICATIONS_INTERVAL_MS = 90 * 1000;
+// Goal: a new post reaches Telegram within 3 minutes. The loop checks groups one after another
+// and every group at least this often (10 groups x ~13 s = ~2.2 min).
+export const GROUP_TARGET_MS = 150 * 1000;
+
+// Facebook notifications ("X posted in Group Y"): off — they miss posts and cost visits.
+// Set a number of ms (e.g. 90 * 1000) to switch them on again.
+export const NOTIFICATIONS_INTERVAL_MS = Number.POSITIVE_INFINITY;
 export const BACKUP_VISIT_MS = 60 * 60 * 1000;
 export const SEEN_NOTIFICATIONS_LIMIT = 500;
 
@@ -56,7 +60,7 @@ export const OUTBOX_LIMIT = 500;
 
 // How far a group visit scrolls. After a break (night, PC off) the first visit goes deeper
 // so posts published meanwhile are not missed.
-export const NORMAL_SCROLL_STEPS = 6; // ~10-15 newest posts
+export const NORMAL_SCROLL_STEPS = 2; // ~5-8 newest posts: enough when every group is checked every 2-3 min
 export const DEEP_SCROLL_STEPS = 25; // ~40-50 posts
 export const DEEP_SCAN_AFTER_MS = 3 * 60 * 60 * 1000;
 

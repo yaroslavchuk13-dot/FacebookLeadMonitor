@@ -103,6 +103,9 @@ Object.assign(timing, {
   emptyFeedRetryMs: 0,
   queueGapMinMs: 0,
   queueGapMaxMs: 0,
+  stepGapMinMs: 1000, // not slept: singleStep stops the loop after one step
+  stepGapMaxMs: 1000,
+  singleStep: true,
   notificationsIntervalMs: Number.POSITIVE_INFINITY,
 });
 
@@ -158,21 +161,25 @@ test("a tick visits the group, sends posts and schedules the next visit", async 
   assert.equal(monitor().lastRun.status, "ok");
 
   const alarm = fake.alarms.get(ALARM_NAME);
-  assert.ok(alarm.delayInMinutes >= 0.5 && alarm.delayInMinutes <= 40 / 60, String(alarm.delayInMinutes));
+  assert.equal(alarm.delayInMinutes, 1); // safety net if the worker dies mid-loop
   assert.ok(monitor().nextRunAt > Date.now());
 });
 
-test("each group once, then the backup round waits an hour; the same tab is reused", async () => {
+test("continuous round: groups one after another, the same tab is reused", async () => {
   await runTick();
   await runTick();
-  await runTick(); // both visited a moment ago -> nothing to do
-  assert.deepEqual(fake.navigations.map((u) => new URL(u).pathname), ["/groups/aaa/", "/groups/bbb/"]);
+  await runTick(); // all fresh -> the loop does not idle: the oldest one again
+  assert.deepEqual(fake.navigations.map((u) => new URL(u).pathname), ["/groups/aaa/", "/groups/bbb/", "/groups/aaa/"]);
   assert.equal(fake.tabs.size, 1);
-  assert.ok(fake.alarms.has(ALARM_NAME), "next check is scheduled while idle");
+});
 
-  fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // an hour later
+test("a group not checked for 2.5 min goes before a profile check", async () => {
+  const now = Date.now();
+  fake.store.monitor.groupLastVisit = { aaa: now - 10_000, bbb: now - 200_000 };
+  fake.profileCheck = { id: 3, profile_url: "https://www.facebook.com/profile.php?id=42" };
+  fake.pageResult = okPage(post(1));
   await runTick();
-  assert.equal(new URL(fake.navigations.at(-1)).pathname, "/groups/aaa/");
+  assert.equal(new URL(fake.navigations[0]).pathname, "/groups/bbb/");
 });
 
 test("a closed monitor tab is reopened", async () => {
@@ -256,7 +263,7 @@ test("start creates the watchdog, stop removes it", async () => {
   fake.store.monitor = { running: false };
   assert.equal((await startMonitor()).ok, true);
   assert.ok(fake.alarms.get(WATCHDOG_ALARM).periodInMinutes > 0);
-  await waitFor(() => fake.alarms.has(ALARM_NAME)); // first visit finished
+  await waitFor(() => Boolean(monitor()?.nextRunAt)); // the background step finished // first visit finished
   await stopMonitor();
   assert.equal(fake.alarms.has(WATCHDOG_ALARM), false);
   assert.equal(monitor().currentVisit, null);
@@ -264,17 +271,12 @@ test("start creates the watchdog, stop removes it", async () => {
 
 test("watchdog restarts a lost loop (no tick alarm)", async () => {
   await watchdog();
-  await waitFor(() => fake.alarms.has(ALARM_NAME));
+  await waitFor(() => Boolean(monitor()?.nextRunAt)); // the background step finished
   assert.equal(fake.navigations.length, 1);
   assert.equal(monitor().currentVisit, null);
   assert.ok(monitor().nextRunAt > Date.now());
 });
 
-test("watchdog does nothing while the next visit is scheduled", async () => {
-  fake.alarms.set(ALARM_NAME, { delayInMinutes: 1 });
-  await watchdog();
-  assert.deepEqual(fake.navigations, []);
-});
 
 test("watchdog does nothing when monitoring is stopped", async () => {
   fake.store.monitor = { running: false };
@@ -314,7 +316,7 @@ test("paused from Telegram: no Facebook visit, next check is scheduled", async (
 test("start and stop are reported to the server", async () => {
   fake.store.monitor = { running: false };
   await startMonitor();
-  await waitFor(() => fake.alarms.has(ALARM_NAME));
+  await waitFor(() => Boolean(monitor()?.nextRunAt)); // the background step finished
   await stopByUser();
   const kinds = alertRequests().map((r) => r.body.kind);
   assert.deepEqual(kinds, ["started", "stopped"]);
@@ -329,6 +331,7 @@ const PROFILE_URL = "https://www.facebook.com/profile.php?id=42";
 test("a queued profile check is done instead of a group visit", async () => {
   fake.profileCheck = { id: 7, profile_url: PROFILE_URL };
   fake.pageResult = { status: "ok", profile: { status: "ok", has_photo: true, friends: 300 } };
+  fake.store.monitor.groupLastVisit = { aaa: Date.now(), bbb: Date.now() }; // all groups fresh
   await runTick();
   assert.deepEqual(fake.navigations, [PROFILE_URL]);
   const result = fake.requests.find((r) => r.path === "/api/profile_result");
@@ -353,6 +356,7 @@ test("checkpoint on a profile stops monitoring", async () => {
 test("a profile that fails to open is reported as an error", async () => {
   fake.profileCheck = { id: 9, profile_url: PROFILE_URL };
   fake.pageResult = null; // executeScript gives nothing -> exception inside the visit
+  fake.store.monitor.groupLastVisit = { aaa: Date.now(), bbb: Date.now() }; // all groups fresh
   await runTick();
   const result = fake.requests.find((r) => r.path === "/api/profile_result");
   assert.deepEqual(result.body, { check_id: 9, profile: { status: "error" } });
@@ -373,7 +377,7 @@ test("first visit after a break scrolls deep, the next one is normal", async () 
   await runTick(); // never visited -> deep
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // backup round, 1 h later
   await runTick(); // -> normal
-  assert.deepEqual(fake.scriptArgs, [[25], [6]]);
+  assert.deepEqual(fake.scriptArgs, [[25], [2]]);
 
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 4 * 60 * 60 * 1000; // 4 h break
   await runTick();

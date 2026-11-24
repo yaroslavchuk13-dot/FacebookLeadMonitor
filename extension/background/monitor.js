@@ -1,16 +1,16 @@
-// Monitor loop: Facebook notifications -> groups with new posts -> server; hourly backup round.
+// Monitor loop: continuous round of the groups (each checked at least every 2.5 min) -> server.
 // Stops completely on a checkpoint / login page — no attempts to bypass it.
 import { groupFeedUrl } from "../lib/groups.js";
 import {
   addToOutbox,
   BACKUP_VISIT_MS,
+  GROUP_TARGET_MS,
   DEEP_SCROLL_STEPS,
   needsDeepScan,
   NORMAL_SCROLL_STEPS,
   NOTIFICATIONS_INTERVAL_MS,
   pickBackupGroup,
   queueFromNotifications,
-  randomPauseSec,
   SEEN_NOTIFICATIONS_LIMIT,
 } from "../lib/scheduler.js";
 import {
@@ -34,9 +34,16 @@ const NOTIFICATIONS_URL = "https://www.facebook.com/notifications";
 // Waits inside one visit (tests set them to 0).
 export const timing = {
   pageLoadTimeoutMs: 45000,
-  renderWaitMinMs: 4000, // let Facebook render the feed after "load"
-  renderWaitMaxMs: 7000,
-  emptyFeedRetryMs: 5000,
+  renderWaitMinMs: 2000, // let Facebook render the feed after "load"
+  renderWaitMaxMs: 3500,
+  emptyFeedRetryMs: 3000,
+  // Continuous loop: a short pause between visits; every group is checked at least this often.
+  stepGapMinMs: 2000,
+  stepGapMaxMs: 4000,
+  groupTargetMs: GROUP_TARGET_MS,
+  pausedPollMs: 30000, // /pause in Telegram: check the pause flag this often
+  errorPauseMs: 10000,
+  singleStep: false, // tests: one step per runTick()
   notificationsIntervalMs: NOTIFICATIONS_INTERVAL_MS,
   backupVisitMs: BACKUP_VISIT_MS,
   failedRetryMs: 10 * 60 * 1000,
@@ -97,27 +104,41 @@ export async function stopMonitor(alert = null) {
 }
 
 /**
- * Runs every minute while monitoring. If no visit is in progress and no next visit
- * is scheduled, the loop was lost (service worker restart) — start the next visit now.
+ * Runs every minute while monitoring. If the loop is not running in this service worker
+ * (it was restarted), start it again.
  */
 export async function watchdog() {
   const monitor = await loadMonitor();
   if (!monitor.running || busy) return;
-  if (await chrome.alarms.get(ALARM_NAME)) return;
   console.warn("Monitor loop was lost — restarting it");
   runTick();
 }
 
-/** Entry point for the alarm and for "start". Never throws. */
+/**
+ * Entry point for the alarm, the watchdog and "start". Runs the continuous loop: one step,
+ * a pause of a few seconds, the next step... until monitoring stops. Never throws.
+ */
 export async function runTick() {
   if (busy) return;
   busy = true;
   try {
-    await tick();
-  } catch (err) {
-    console.error("Monitor tick failed", err);
-    await updateMonitor({ currentVisit: null });
-    await scheduleNext(); // keep going after unexpected errors
+    while ((await loadMonitor()).running) {
+      // Safety net: if this worker dies mid-loop, the alarm starts the loop again in a minute.
+      await chrome.alarms.create(ALARM_NAME, { delayInMinutes: 1 });
+      let pauseMs;
+      try {
+        pauseMs = await tick();
+      } catch (err) {
+        console.error("Monitor step failed", err);
+        await updateMonitor({ currentVisit: null });
+        pauseMs = timing.errorPauseMs;
+      }
+      if (!(await loadMonitor()).running) break;
+      const gap = pauseMs ?? randomBetween(timing.stepGapMinMs, timing.stepGapMaxMs);
+      await updateMonitor({ nextRunAt: Date.now() + gap });
+      if (timing.singleStep) break;
+      await sleep(gap);
+    }
   } finally {
     busy = false;
   }
@@ -139,55 +160,56 @@ export async function resumeIfRunning() {
 // --- one tick ------------------------------------------------------------------------
 
 /**
- * One step of the loop. Priorities:
- *   1. Facebook notifications (every 90 s) -> groups with a new post go to the queue
- *   2. a queued group (new post) — visited right away
- *   3. author profile for the scam check
- *   4. backup round: a group not visited for an hour (or never / after a break: deep)
+ * One step of the continuous loop. Priorities:
+ *   1. a group not checked for GROUP_TARGET_MS (2.5 min) — the oldest first (never visited first)
+ *   2. author profile for the scam check (only when all groups are fresh)
+ *   3. otherwise the group checked longest ago — the loop never idles
+ * Facebook notifications are used only if enabled (NOTIFICATIONS_INTERVAL_MS), off by default.
+ * Returns the pause before the next step in ms, or undefined for the normal short pause.
  */
 async function tick() {
   const monitor = await loadMonitor();
-  if (!monitor.running) return;
+  if (!monitor.running) return undefined;
   const settings = await loadSettings();
   if (!settings.groupIds.length) {
     await stopMonitor({ kind: "error", message: "Список груп порожній.", at: Date.now() });
-    return;
+    return undefined;
   }
 
   const control = await getControl(settings);
   if (control.paused) {
     // /pause in Telegram: do not open Facebook, just check again later.
     await updateMonitor({ lastRun: { groupId: null, at: Date.now(), status: "paused", found: 0, sent: 0 } });
-    await scheduleNext();
-    return;
+    return timing.pausedPollMs;
   }
 
   const now = Date.now();
   if (now - (monitor.lastNotificationsCheck ?? 0) >= timing.notificationsIntervalMs) {
-    // New posts found -> their groups are visited right now, in the same step.
     if (await checkNotifications(settings, monitor)) await drainQueue(settings);
-    await scheduleNext();
-    return;
+    return undefined;
   }
   if ((monitor.notifyQueue ?? []).some((id) => settings.groupIds.includes(id))) {
     await drainQueue(settings);
-    await scheduleNext();
-    return;
+    return undefined;
+  }
+  const pick = (targetMs) => pickBackupGroup(
+    settings.groupIds, monitor.groupLastVisit, now, targetMs, monitor.groupRetryAt,
+  );
+  const due = pick(timing.groupTargetMs);
+  if (due) {
+    await visitAndDeliver(settings, monitor, due);
+    return undefined;
   }
   if (control.profileCheck) {
-    // A new lead waits for the author scam check.
     await checkProfile(settings, monitor, control.profileCheck);
-    return;
+    return undefined;
   }
-  const backup = pickBackupGroup(
-    settings.groupIds, monitor.groupLastVisit, now, timing.backupVisitMs, monitor.groupRetryAt,
-  );
-  if (backup) {
-    await visitAndDeliver(settings, monitor, backup);
-    await scheduleNext();
-    return;
+  const oldest = pick(0);
+  if (oldest) {
+    await visitAndDeliver(settings, monitor, oldest);
+    return undefined;
   }
-  await scheduleNext(); // nothing to do now: wait for the next notifications check
+  return timing.errorPauseMs; // every group failed recently: wait a little
 }
 
 /**
@@ -325,7 +347,6 @@ async function checkProfile(settings, monitor, check) {
   const profile = visit.status === "ok" ? visit.profile : { status: "error" };
   await sendProfileResult(settings, check.id, profile);
   await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastRun });
-  await scheduleNext();
 }
 
 function runInfo(groupId, visit, delivery = { sent: 0, error: null }) {
@@ -354,13 +375,6 @@ async function deliver(settings, posts) {
   }
 }
 
-async function scheduleNext() {
-  const monitor = await loadMonitor();
-  if (!monitor.running) return;
-  const pauseSec = randomPauseSec();
-  await chrome.alarms.create(ALARM_NAME, { delayInMinutes: pauseSec / 60 });
-  await updateMonitor({ nextRunAt: Date.now() + pauseSec * 1000 });
-}
 
 // --- visiting a group --------------------------------------------------------------
 

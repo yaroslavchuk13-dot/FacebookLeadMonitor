@@ -8,15 +8,15 @@
   const AUTHOR_HEADINGS = "h2, h3, h4, strong";
   const NOT_TEXT = '[role="button"], a, h2, h3, h4, strong';
   const MAX_TEXT_LENGTH = 10000;
-  const HOVER_WAIT_MS = 400;
+  const HOVER_WAIT_MS = 300;
   const MAX_CLICKS_PER_PASS = 15;
-  const CLICK_PAUSE_MIN_MS = 250; // human-like pause between button clicks
-  const CLICK_PAUSE_MAX_MS = 600;
-  const AFTER_CLICKS_WAIT_MS = 800; // let Facebook re-render the expanded text
+  const CLICK_PAUSE_MIN_MS = 150; // short pause between button clicks
+  const CLICK_PAUSE_MAX_MS = 350;
+  const AFTER_CLICKS_WAIT_MS = 500; // let Facebook re-render the expanded text
   const SCROLL_STEPS = 6; // read, scroll, read... Facebook renders only posts near the screen
   const MAX_HOVER_PER_POST = 6;
-  const SCROLL_PAUSE_MIN_MS = 1200;
-  const SCROLL_PAUSE_MAX_MS = 2000;
+  const SCROLL_PAUSE_MIN_MS = 700;
+  const SCROLL_PAUSE_MAX_MS = 1200;
   // aria-label of comment articles: "Comment by …" / "Коментар від …" / "Комментарий от …"
   const COMMENT_LABEL_RE = /comment|коментар|комментар/i;
 
