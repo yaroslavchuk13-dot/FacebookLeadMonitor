@@ -91,6 +91,32 @@
     return null;
   }
 
+  // "4h", "5 days ago", "Yesterday at 10:15", "21 November at 14:00", "Щойно", "Вчера в 10:15"
+  const TIME_HINT_RE = /\d|just now|yesterday|today|щойно|вчора|сьогодні|только что|вчера|сегодня/i;
+  const MAX_TIME_TEXT = 60;
+
+  function timeLabel(el) {
+    const text = cleanText(el.getAttribute("aria-label") || el.innerText).split("\n")[0];
+    return text && text.length <= MAX_TIME_TEXT && TIME_HINT_RE.test(text) ? text : null;
+  }
+
+  /** Text of the post's timestamp (parsed into a date by the server), or null. */
+  function findPostedText(post, groupId) {
+    // The timestamp is the link that points to the post itself.
+    for (const a of own(post, "a[href]")) {
+      if (!canonicalPostUrl(a.getAttribute("href"), groupId)) continue;
+      const text = timeLabel(a);
+      if (text) return text;
+    }
+    // Otherwise: a link-like element with a time-like label (href not revealed yet).
+    for (const el of own(post, '[aria-label], a, [role="link"]')) {
+      if (canonicalProfileUrl(el.getAttribute("href"))) continue; // author name
+      const text = timeLabel(el);
+      if (text && !/\b(?:comment|like|share|reply)/i.test(text)) return text;
+    }
+    return null;
+  }
+
   /** Links that may become the post link on hover (the timestamp): not author, not hashtag. */
   function hoverCandidates(post) {
     return own(post, 'a, [role="link"]')
@@ -202,6 +228,7 @@
         group_name: groupName(),
         post_url: postUrl,
         link_found: Boolean(realUrl), // for the popup only; the server ignores it
+        posted_text: findPostedText(root, groupId),
         author_name: author.name,
         author_profile_url: author.url,
         text,

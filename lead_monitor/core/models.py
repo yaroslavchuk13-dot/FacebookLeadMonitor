@@ -33,9 +33,10 @@ class FacebookPost(BaseModel):
     author_profile_url: str | None = None  # None for anonymous posts
     text: str = Field(min_length=1)
     posted_at: datetime | None = None  # if Facebook shows it
+    posted_text: str | None = Field(default=None, max_length=100)  # raw timestamp: "4h", "Yesterday at 10:15"
     collected_at: datetime = Field(default_factory=_utc_now)
 
-    @field_validator("group_name", "author_name", "author_profile_url", mode="before")
+    @field_validator("group_name", "author_name", "author_profile_url", "posted_text", mode="before")
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():

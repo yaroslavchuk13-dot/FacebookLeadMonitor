@@ -84,6 +84,18 @@ class KeywordFilter:
     def enabled(self) -> bool:
         return bool(self.groups)
 
+    def found_in_group(self, text: str, group: str) -> list[str]:
+        """Words of the text matched by a group, as written in the text: ["Greenwich", "SE10"]."""
+        normalized = _normalize(text)
+        source = text if len(text) == len(normalized) else normalized
+        found: list[str] = []
+        for _term, rx in self._groups.get(group, []):
+            for m in rx.finditer(normalized):
+                word = source[m.start():m.end()].strip()
+                if word and word.lower() not in (f.lower() for f in found):
+                    found.append(word)
+        return found
+
     def match(self, text: str) -> KeywordMatch:
         normalized = _normalize(text)
         excluded_by = [term for term, rx in self._exclude if rx.search(normalized)]

@@ -88,7 +88,7 @@ def describe_pay(text: str) -> str:
     """One line for the Telegram message: "£25/год (≈ £225 за 9-год день)" or "не вказана"."""
     pays = extract_pay(text)
     if not pays:
-        return "Оплата не вказана"
+        return "не вказана"
     parts = [pay.label() for pay in pays[:3]]
     hourly = next((p for p in pays if p.unit == "hour"), None)
     if hourly and not any(p.unit == "day" for p in pays):

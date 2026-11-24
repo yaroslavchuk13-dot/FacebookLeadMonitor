@@ -1,12 +1,14 @@
 """Telegram message texts (HTML parse mode). Pure functions, unit-tested."""
 
 import time
+from datetime import datetime
 from html import escape
 from typing import Any
 
 from lead_monitor.core.models import ExtensionAlert
 from lead_monitor.core.state import MonitorState
 from lead_monitor.filters.pay import describe_pay
+from lead_monitor.filters.post_time import describe_age
 
 MAX_TEXT_CHARS = 3500  # Telegram limit is 4096 for the whole message
 FALLBACK_LINK_MARK = "flm_post="  # see extension/content/post_links.js fallbackPostUrl
@@ -25,24 +27,65 @@ def is_fallback_link(url: str) -> bool:
     return FALLBACK_LINK_MARK in url
 
 
-def format_lead(lead: dict[str, Any]) -> str:
+MAX_TITLE_CHARS = 90
+SHORT_FIRST_LINE = 20  # "Linsco Recruitment" alone is not a title: add the next line
+
+
+def lead_title(text: str) -> str:
+    """The job title: the first line of the post (plus the second one if the first is short)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "Вакансія"
+    title = lines[0]
+    if len(title) < SHORT_FIRST_LINE and len(lines) > 1:
+        title = f"{title} — {lines[1]}"
+    return title if len(title) <= MAX_TITLE_CHARS else title[:MAX_TITLE_CHARS].rstrip() + "…"
+
+
+def _posted(lead: dict[str, Any], now: datetime | None) -> str:
+    raw = lead.get("posted_at")
+    if not raw:
+        return "невідомо"
+    try:
+        posted_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return "невідомо"
+    now = now or datetime.now().astimezone()
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=now.tzinfo)
+    return describe_age(posted_at, now)
+
+
+def format_lead(lead: dict[str, Any], location: list[str] | None = None, now: datetime | None = None) -> str:
+    """Lead message: title, then separate lines for pay, place, date, group, author, scam check,
+    and the full post text in a collapsible quote."""
     group = escape(lead.get("group_name") or lead["group_id"])
     author = escape(lead.get("author_name") or "Анонімно")
     profile = lead.get("author_profile_url")
-    author_line = f'👤 <a href="{escape(profile, quote=True)}">{author}</a>' if profile else f"👤 {author}"
+    author_value = f'<a href="{escape(profile, quote=True)}">{author}</a>' if profile else author
 
     text = lead["text"]
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS].rstrip() + "…"
 
-    lines = [f"🔔 <b>Новий лід</b> · {group}", f"💷 <b>{escape(describe_pay(lead['text']))}</b>", author_line]
-    keywords = lead.get("matched_keywords") or []
-    if keywords:
-        lines.append("🔑 " + escape(", ".join(keywords)))
-    lines += format_scam(lead)
-    lines += ["", escape(text)]
+    lines = [
+        f"🔥 <b>{escape(lead_title(lead['text']))}</b>",
+        "",
+        f"💷 <b>Оплата:</b> {escape(describe_pay(lead['text']))}",
+    ]
+    if location:
+        lines.append(f"📍 <b>Місце:</b> {escape(', '.join(location))}")
+    lines += [
+        f"🕒 <b>Опубліковано:</b> {escape(_posted(lead, now))}",
+        f"👥 <b>Група:</b> {group}",
+        f"👤 <b>Автор:</b> {author_value}",
+    ]
+    scam = format_scam(lead)
+    if scam:
+        lines += ["", *scam]
+    lines += ["", f"<blockquote expandable>{escape(text)}</blockquote>"]
     if is_fallback_link(lead["post_url"]):
-        lines += ["", "<i>Посилання на сам допис не знайдено — кнопка відкриє групу.</i>"]
+        lines.append("<i>Посилання на сам допис не знайдено — кнопка відкриє групу.</i>")
     return "\n".join(lines)
 
 
@@ -57,16 +100,16 @@ def format_scam(lead: dict[str, Any]) -> list[str]:
     if not level:
         return []
     if level == "pending":
-        return ["👤 <i>Перевіряю автора…</i>"]
+        return ["🛡 <i>Перевіряю автора…</i>"]
     reasons_red = [escape(r) if r.startswith("ℹ️") else f"• {escape(r)}" for r in red]
     if len(reasons_red) > MAX_SCAM_REASONS:
         extra = len(reasons_red) - MAX_SCAM_REASONS
         reasons_red = [*reasons_red[:MAX_SCAM_REASONS], f"…і ще {extra}"]
     if level == "red":
-        return ["🔴 <b>Схоже на скам</b>", *reasons_red]
+        return ["🛡 🔴 <b>Схоже на скам</b>", *reasons_red]
     if level == "green":
-        return ["🟢 Явних ознак скаму не знайдено", *[f"✓ {escape(g)}" for g in green][:MAX_SCAM_REASONS]]
-    return ["🟡 <b>Будьте уважні</b>", *(reasons_red or ["• Мало даних про автора"])]
+        return ["🛡 🟢 Явних ознак скаму не знайдено", *[f"✓ {escape(g)}" for g in green][:MAX_SCAM_REASONS]]
+    return ["🛡 🟡 <b>Будьте уважні</b>", *(reasons_red or ["• Мало даних про автора"])]
 
 
 def lead_button_text(lead: dict[str, Any]) -> str:

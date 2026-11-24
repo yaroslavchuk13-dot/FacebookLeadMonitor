@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from lead_monitor.notifications.formatting import (
     format_lead,
     format_status,
     lead_button_text,
+    lead_title,
 )
 from lead_monitor.notifications.telegram import TelegramService
 from lead_monitor.storage.database import Database
@@ -46,14 +48,38 @@ def test_lead_message_is_html_escaped() -> None:
     assert "Fire &lt;Stoppers&gt; &amp; Co" in text
     assert "Need &lt;b&gt;fire stoppers&lt;/b&gt; &amp; sprayers" in text
     assert '<a href="https://www.facebook.com/profile.php?id=7&amp;x=1">Ivan</a>' in text
-    assert "🔑 fire stop*" in text
     assert lead_button_text(LEAD) == "🔗 Відкрити допис"
 
 
-def test_anonymous_lead_without_keywords() -> None:
+def test_message_has_separate_lines() -> None:
+    lead = {
+        **LEAD,
+        "text": "MKA require 2 fire stoppers for a project in Greenwich.\nStart date - ASAP.\n£27.50 per hour",
+        "posted_at": "2026-11-24T13:40:00+00:00",
+    }
+    now = datetime(2026, 11, 24, 17, 40, tzinfo=UTC)
+    lines = format_lead(lead, location=["Greenwich"], now=now).split("\n")
+    assert lines[0] == "🔥 <b>MKA require 2 fire stoppers for a project in Greenwich.</b>"
+    assert "💷 <b>Оплата:</b> £27.50/год (≈ £220 за 8-год день)" in lines
+    assert "📍 <b>Місце:</b> Greenwich" in lines
+    assert "🕒 <b>Опубліковано:</b> 4 год тому (24.11 13:40)" in lines
+    assert "👥 <b>Група:</b> Fire &lt;Stoppers&gt; &amp; Co" in lines
+    assert "<blockquote expandable>MKA require" in "\n".join(lines)
+    assert lines[-1].endswith("</blockquote>")
+
+
+def test_title_from_short_first_line() -> None:
+    assert lead_title("Linsco Recruitment\nFire Door Installers required in Watford") == (
+        "Linsco Recruitment — Fire Door Installers required in Watford"
+    )
+    assert lead_title("x" * 200).endswith("…")
+    assert lead_title("   ") == "Вакансія"
+
+
+def test_anonymous_lead_and_unknown_date() -> None:
     text = format_lead({**LEAD, "author_name": None, "author_profile_url": None, "matched_keywords": []})
-    assert "👤 Анонімно" in text
-    assert "🔑" not in text
+    assert "👤 <b>Автор:</b> Анонімно" in text
+    assert "🕒 <b>Опубліковано:</b> невідомо" in text
 
 
 def test_fallback_link_is_explained() -> None:
@@ -65,7 +91,7 @@ def test_fallback_link_is_explained() -> None:
 def test_long_text_is_truncated() -> None:
     text = format_lead({**LEAD, "text": "x" * (MAX_TEXT_CHARS + 500)})
     assert len(text) < 4096
-    assert text.endswith("…")
+    assert text.endswith("…</blockquote>")
 
 
 def test_alert_text() -> None:
@@ -116,7 +142,9 @@ def add_lead(db: Database, n: int, is_lead: bool = True) -> None:
         author_name=f"A{n}",
         text=f"lead text {n}",
     )
-    db.add_post(post, KeywordMatch(is_lead=is_lead, matched=["kw"] if is_lead else []))
+    stored = db.add_post(post, KeywordMatch(is_lead=is_lead, matched=["kw"] if is_lead else []))
+    if is_lead:  # as the scam checker does right after saving
+        db.set_scam_result(stored.id, "pending", [], [])
 
 
 def test_pending_leads_are_sent_once_in_order(service) -> None:
@@ -125,7 +153,8 @@ def test_pending_leads_are_sent_once_in_order(service) -> None:
     add_lead(db, 2, is_lead=False)
     add_lead(db, 3)
     assert asyncio.run(svc.deliver_once()) == 2
-    assert [m["text"].split("\n")[-1] for m in bot.sent] == ["lead text 1", "lead text 3"]
+    assert ["lead text 1" in m["text"] for m in bot.sent] == [True, False]
+    assert "lead text 3" in bot.sent[1]["text"]
     assert all(m["chat_id"] == CHAT_ID for m in bot.sent)
     assert bot.sent[0]["markup"].inline_keyboard[0][0].url.endswith("/posts/1/")
     # Already delivered -> nothing on the next round.
@@ -164,7 +193,7 @@ def test_alerts_go_before_leads(service) -> None:
 
     asyncio.run(scenario())
     assert bot.sent[0]["text"].startswith("⛔ Checkpoint!")
-    assert bot.sent[1]["text"].endswith("lead text 1")
+    assert "lead text 1" in bot.sent[1]["text"]
 
 
 def test_without_chat_id_nothing_is_sent_and_leads_wait(tmp_path: Path) -> None:
@@ -215,6 +244,7 @@ def test_real_bot_object_can_be_created() -> None:
 
 def test_lead_message_shows_pay() -> None:
     lead = {**LEAD, "text": "Fire stopper required in Moorgate\n9hrs paid\nContract rate £25/h"}
-    assert "💷 <b>£25/год (≈ £225 за 9-год день)</b>" in format_lead(lead)
+    assert "💷 <b>Оплата:</b> £25/год (≈ £225 за 9-год день)" in format_lead(lead)
     no_pay = {**LEAD, "text": "Fire stopper required in Moorgate, rate negotiable"}
-    assert "💷 <b>Оплата не вказана</b>" in format_lead(no_pay)
+    assert "💷 <b>Оплата:</b> Оплата не вказана" not in format_lead(no_pay)
+    assert "💷 <b>Оплата:</b> не вказана" in format_lead(no_pay)

@@ -168,7 +168,8 @@ async function onParseTab() {
       const author = p.author_name ?? "(анонімно)";
       const profile = p.author_profile_url ? "" : " [без профілю]";
       const link = p.link_found ? p.post_url : `${p.post_url}\n   (посилання на допис не знайдено — веде на групу)`;
-      return `── ${i + 1}. 👤 ${author}${profile} (${p.text.length} символів) ──\n${p.text}\n🔗 ${link}`;
+      const when = p.posted_text ?? "час не знайдено";
+      return `── ${i + 1}. 👤 ${author}${profile} · 🕒 ${when} (${p.text.length} символів) ──\n${p.text}\n🔗 ${link}`;
     });
     preview.textContent = [header, ...posts].join("\n\n");
   } catch (err) {

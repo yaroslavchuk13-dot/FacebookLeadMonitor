@@ -16,7 +16,7 @@ from lead_monitor.filters.pay import describe_pay, extract_pay, shift_hours
         ("rate £25-£28 ph", "£25–£28/год (≈ £200–£224 за 8-год день)"),
         ("Price work £12 per m2", "£12/м²"),
         ("Pay: £1000 per week", "£1000/тиждень"),
-        ("rate negotiable doe", "Оплата не вказана"),
+        ("rate negotiable doe", "не вказана"),
         ("27.50 per hour, 10 hour days", "£27.50/год (≈ £275 за 10-год день)"),
         ("Pay rate £180", "£180"),
     ],

@@ -138,3 +138,10 @@ def test_keyword_file_with_bom(tmp_path: Path) -> None:
     path = tmp_path / "keywords.txt"
     path.write_bytes("﻿[include]\nfire stop*\n".encode())
     assert KeywordFile(path).get().include == ["fire stop*"]
+
+
+def test_found_in_group_returns_words_as_written() -> None:
+    f = parse_keyword_text(GROUPS_FILE)
+    text = "Fire stopper required in GREENWICH, site SE10 0AA, Greenwich peninsula"
+    assert f.found_in_group(text, "location") == ["GREENWICH", "SE10"]
+    assert f.found_in_group(text, "nope") == []

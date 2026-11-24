@@ -91,7 +91,7 @@ async def run(settings: Settings) -> None:
     scam = ScamChecker(database, scam_rules, [telegram.notify_verdict] if telegram else [])
     # Order matters: the scam check runs first, so a ready verdict goes into the first message.
     handlers = [log_lead, scam.on_new_lead] + ([telegram.notify_lead] if telegram else [])
-    processor = PostProcessor(database, keywords, handlers)
+    processor = PostProcessor(database, keywords, handlers, max_age_hours=settings.lead_max_age_hours)
 
     async def posts_sink(posts: list[FacebookPost]) -> None:
         state.last_posts_at = time.time()

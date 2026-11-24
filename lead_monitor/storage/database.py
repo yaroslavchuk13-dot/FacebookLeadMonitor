@@ -78,7 +78,7 @@ MIGRATIONS: list[str] = [
 # Columns returned for a lead (Telegram notifier, statistics).
 LEAD_COLUMNS = (
     "id, saved_at, group_id, group_name, author_name, author_profile_url, post_url, text, "
-    "matched_keywords, telegram_message_id, scam_level, scam_red, scam_green"
+    "matched_keywords, telegram_message_id, scam_level, scam_red, scam_green, posted_at"
 )
 
 
@@ -202,17 +202,26 @@ class Database:
 
     # --- Telegram delivery ------------------------------------------------------------
 
-    def pending_leads(self, max_age_hours: int = 24, limit: int = 20) -> list[dict[str, Any]]:
-        """Leads not yet sent to Telegram (oldest first). Older ones are not worth sending."""
-        since = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+    def pending_leads(
+        self, max_age_hours: int = 24, limit: int = 20, scam_grace_seconds: int = 120
+    ) -> list[dict[str, Any]]:
+        """Leads not yet sent to Telegram (oldest first). Older ones are not worth sending.
+
+        A lead waits until the scam check has started (scam_level is set), so the first message
+        already says "checking the author..."; after scam_grace_seconds it is sent anyway.
+        """
+        now = datetime.now(UTC)
+        since = (now - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+        grace = (now - timedelta(seconds=scam_grace_seconds)).isoformat(timespec="seconds")
         with self._lock:
             rows = self._conn.execute(
                 f"""
                 SELECT {LEAD_COLUMNS} FROM posts
                 WHERE is_lead = 1 AND notified_at IS NULL AND saved_at >= ?
+                  AND (scam_level IS NOT NULL OR saved_at < ?)
                 ORDER BY id LIMIT ?
                 """,
-                (since, limit),
+                (since, grace, limit),
             ).fetchall()
         return [_lead_row(r) for r in rows]
 

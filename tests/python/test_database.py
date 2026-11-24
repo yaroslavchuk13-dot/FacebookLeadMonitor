@@ -110,10 +110,18 @@ def test_content_hash_ignores_case_and_spacing() -> None:
 def test_pending_and_mark_notified(db: Database) -> None:
     db.add_post(make_post(1), LEAD)
     db.add_post(make_post(2), NOT_LEAD)
+    assert db.pending_leads() == []  # waits for the scam check to start
+    db.set_scam_result(1, "pending", [], [])
     pending = db.pending_leads()
     assert [p["id"] for p in pending] == [1]
     db.mark_notified(1, 555)
     assert db.pending_leads() == []
+
+
+def test_lead_without_scam_check_is_sent_after_grace_period(db: Database) -> None:
+    db.add_post(make_post(1), LEAD)
+    assert db.pending_leads(scam_grace_seconds=120) == []
+    assert [p["id"] for p in db.pending_leads(scam_grace_seconds=-1)] == [1]
 
 
 def test_migration_2_does_not_resend_old_leads(tmp_path: Path) -> None:

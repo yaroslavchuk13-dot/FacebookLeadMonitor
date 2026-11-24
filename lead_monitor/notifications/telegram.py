@@ -125,11 +125,15 @@ class TelegramService:
             sent += 1
         return sent
 
+    def _format(self, lead: dict[str, Any]) -> str:
+        location = self.keywords.get().found_in_group(lead["text"], "location")
+        return format_lead(lead, location=location)
+
     async def _edit_lead(self, lead: dict[str, Any]) -> bool | None:
         try:
             result = await self._call(
                 lambda: self.bot.edit_message_text(
-                    text=format_lead(lead),
+                    text=self._format(lead),
                     chat_id=self.chat_id,
                     message_id=lead["telegram_message_id"],
                     reply_markup=_lead_markup(lead),
@@ -145,7 +149,7 @@ class TelegramService:
         markup = _lead_markup(lead)
         try:
             message = await self._call(
-                lambda: self.bot.send_message(self.chat_id, format_lead(lead), reply_markup=markup)
+                lambda: self.bot.send_message(self.chat_id, self._format(lead), reply_markup=markup)
             )
         except TelegramBadRequest as err:
             # The message itself is broken — retrying would fail forever. Skip it.
