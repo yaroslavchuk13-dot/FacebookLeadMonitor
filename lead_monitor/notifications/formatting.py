@@ -7,6 +7,7 @@ from typing import Any
 
 from lead_monitor.core.models import ExtensionAlert
 from lead_monitor.core.state import MonitorState
+from lead_monitor.filters.job_details import extract_details
 from lead_monitor.filters.pay import describe_pay
 from lead_monitor.filters.post_time import describe_age
 
@@ -45,11 +46,11 @@ def lead_title(text: str) -> str:
 def _posted(lead: dict[str, Any], now: datetime | None) -> str:
     raw = lead.get("posted_at")
     if not raw:
-        return "невідомо"
+        return "Дата допису невідома"
     try:
         posted_at = datetime.fromisoformat(raw)
     except ValueError:
-        return "невідомо"
+        return "Дата допису невідома"
     now = now or datetime.now().astimezone()
     if posted_at.tzinfo is None:
         posted_at = posted_at.replace(tzinfo=now.tzinfo)
@@ -68,17 +69,25 @@ def format_lead(lead: dict[str, Any], location: list[str] | None = None, now: da
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS].rstrip() + "…"
 
+    title = lead_title(lead["text"])
+    details = extract_details(lead["text"], title=title)
     lines = [
-        f"🔥 <b>{escape(lead_title(lead['text']))}</b>",
+        f"🕒 <b>{escape(_posted(lead, now))}</b>",
+        f"🔥 <b>{escape(title)}</b>",
         "",
         f"💷 <b>Оплата:</b> {escape(describe_pay(lead['text']))}",
+        f"📍 <b>Місце:</b> {escape(', '.join(location)) if location else 'не вказано'}",
     ]
-    if location:
-        lines.append(f"📍 <b>Місце:</b> {escape(', '.join(location))}")
+    if details.requirements:
+        lines += ["", "📋 <b>Вимоги:</b>", *[f"• {escape(item)}" for item in details.requirements]]
+    if details.info:
+        lines += ["", "ℹ️ <b>Додатково:</b>", *[f"• {escape(item)}" for item in details.info]]
+    contact = ", ".join(details.contacts) if details.contacts else "не вказано — напишіть автору"
     lines += [
-        f"🕒 <b>Опубліковано:</b> {escape(_posted(lead, now))}",
-        f"👥 <b>Група:</b> {group}",
+        "",
+        f"📞 <b>Контакт:</b> {escape(contact)}",
         f"👤 <b>Автор:</b> {author_value}",
+        f"👥 <b>Група:</b> {group}",
     ]
     scam = format_scam(lead)
     if scam:

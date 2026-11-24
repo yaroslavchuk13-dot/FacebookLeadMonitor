@@ -59,10 +59,11 @@ def test_message_has_separate_lines() -> None:
     }
     now = datetime(2026, 11, 24, 17, 40, tzinfo=UTC)
     lines = format_lead(lead, location=["Greenwich"], now=now).split("\n")
-    assert lines[0] == "🔥 <b>MKA require 2 fire stoppers for a project in Greenwich.</b>"
+    assert lines[0] == "🕒 <b>4 год тому (24.11 13:40)</b>"
+    assert lines[1] == "🔥 <b>MKA require 2 fire stoppers for a project in Greenwich.</b>"
     assert "💷 <b>Оплата:</b> £27.50/год (≈ £220 за 8-год день)" in lines
     assert "📍 <b>Місце:</b> Greenwich" in lines
-    assert "🕒 <b>Опубліковано:</b> 4 год тому (24.11 13:40)" in lines
+    assert "ℹ️ <b>Додатково:</b>" in lines and "• Start date - ASAP" in lines
     assert "👥 <b>Група:</b> Fire &lt;Stoppers&gt; &amp; Co" in lines
     assert "<blockquote expandable>MKA require" in "\n".join(lines)
     assert lines[-1].endswith("</blockquote>")
@@ -79,7 +80,8 @@ def test_title_from_short_first_line() -> None:
 def test_anonymous_lead_and_unknown_date() -> None:
     text = format_lead({**LEAD, "author_name": None, "author_profile_url": None, "matched_keywords": []})
     assert "👤 <b>Автор:</b> Анонімно" in text
-    assert "🕒 <b>Опубліковано:</b> невідомо" in text
+    assert "🕒 <b>Дата допису невідома</b>" in text
+    assert "📞 <b>Контакт:</b> не вказано — напишіть автору" in text
 
 
 def test_fallback_link_is_explained() -> None:
