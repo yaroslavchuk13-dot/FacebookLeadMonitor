@@ -34,14 +34,16 @@ export function pickBackupGroup(
 export function queueFromNotifications(items, groupIds, queue, seen, limit = SEEN_NOTIFICATIONS_LIMIT) {
   const watched = new Set(groupIds ?? []);
   const seenSet = new Set(seen ?? []);
-  const newQueue = [...(queue ?? [])];
+  const fresh = []; // groups with new notifications, newest first (page order)
   const newSeen = [...(seen ?? [])];
   for (const { key, groupId } of items ?? []) {
     if (seenSet.has(key)) continue;
     seenSet.add(key);
     newSeen.push(key);
-    if (watched.has(groupId) && !newQueue.includes(groupId)) newQueue.push(groupId);
+    if (watched.has(groupId) && !fresh.includes(groupId)) fresh.push(groupId);
   }
+  // Newest posts first: freshly notified groups go before the ones already waiting.
+  const newQueue = [...fresh, ...(queue ?? []).filter((id) => !fresh.includes(id))];
   return { queue: newQueue, seen: newSeen.slice(-limit) };
 }
 

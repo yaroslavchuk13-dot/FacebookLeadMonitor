@@ -39,6 +39,9 @@ export const timing = {
   notificationsIntervalMs: NOTIFICATIONS_INTERVAL_MS,
   backupVisitMs: BACKUP_VISIT_MS,
   failedRetryMs: 10 * 60 * 1000,
+  maxQueuePerTick: 3, // groups with new posts visited in one step (keeps the step short)
+  queueGapMinMs: 3000, // short pause between those visits
+  queueGapMaxMs: 6000,
 };
 const STOP_STATES = new Set(["checkpoint", "login_required"]);
 
@@ -160,12 +163,14 @@ async function tick() {
 
   const now = Date.now();
   if (now - (monitor.lastNotificationsCheck ?? 0) >= timing.notificationsIntervalMs) {
-    await checkNotifications(settings, monitor);
+    // New posts found -> their groups are visited right now, in the same step.
+    if (await checkNotifications(settings, monitor)) await drainQueue(settings);
+    await scheduleNext();
     return;
   }
-  const queued = (monitor.notifyQueue ?? []).find((id) => settings.groupIds.includes(id));
-  if (queued) {
-    await visitAndDeliver(settings, monitor, queued);
+  if ((monitor.notifyQueue ?? []).some((id) => settings.groupIds.includes(id))) {
+    await drainQueue(settings);
+    await scheduleNext();
     return;
   }
   if (control.profileCheck) {
@@ -178,24 +183,28 @@ async function tick() {
   );
   if (backup) {
     await visitAndDeliver(settings, monitor, backup);
+    await scheduleNext();
     return;
   }
   await scheduleNext(); // nothing to do now: wait for the next notifications check
 }
 
-/** Opens facebook.com/notifications and queues groups that got new posts. */
+/**
+ * Opens facebook.com/notifications and queues groups that got new posts.
+ * Returns false if monitoring stopped (by the user or because of a checkpoint).
+ */
 async function checkNotifications(settings, monitor) {
   await updateMonitor({ currentVisit: { groupId: "сповіщення Facebook", startedAt: Date.now() }, nextRunAt: null });
   const visit = await visitNotifications(monitor.tabId);
   const current = await loadMonitor();
-  if (!current.running) return;
+  if (!current.running) return false;
 
   if (STOP_STATES.has(visit.status)) {
     const alert = { kind: visit.status, message: STOP_MESSAGES[visit.status], at: Date.now() };
     await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastNotificationsCheck: Date.now() });
     await sendAlert(settings, { kind: alert.kind, message: alert.message, stopped: true });
     await stopMonitor(alert);
-    return;
+    return false;
   }
 
   const items = visit.status === "ok" ? visit.items : [];
@@ -217,10 +226,25 @@ async function checkNotifications(settings, monitor) {
       error: visit.error ?? null,
     },
   });
-  await scheduleNext();
+  return true;
 }
 
-/** Visits one group, sends its posts to the server, updates the state. */
+/**
+ * Visits queued groups (new posts from notifications) one after another, without the long
+ * pause — a few seconds between them, at most MAX_QUEUE_PER_TICK per step.
+ */
+async function drainQueue(settings) {
+  for (let i = 0; i < timing.maxQueuePerTick; i += 1) {
+    const monitor = await loadMonitor();
+    if (!monitor.running) return;
+    const groupId = (monitor.notifyQueue ?? []).find((id) => settings.groupIds.includes(id));
+    if (!groupId) return;
+    if (i > 0) await sleep(randomBetween(timing.queueGapMinMs, timing.queueGapMaxMs));
+    await visitAndDeliver(settings, monitor, groupId);
+  }
+}
+
+/** Visits one group, sends its posts to the server, updates the state (no scheduling). */
 async function visitAndDeliver(settings, monitor, groupId) {
   // After a break (night, PC off) the first visit scrolls deeper to catch up.
   const deep = needsDeepScan(monitor.groupLastVisit?.[groupId]);
@@ -269,7 +293,6 @@ async function visitAndDeliver(settings, monitor, groupId) {
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),
   });
-  await scheduleNext();
 }
 
 /** Opens the author's profile, sends numbers/flags to the server (scam check). */

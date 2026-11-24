@@ -101,6 +101,8 @@ Object.assign(timing, {
   renderWaitMinMs: 0,
   renderWaitMaxMs: 0,
   emptyFeedRetryMs: 0,
+  queueGapMinMs: 0,
+  queueGapMaxMs: 0,
   notificationsIntervalMs: Number.POSITIVE_INFINITY,
 });
 
@@ -402,28 +404,45 @@ async function withNotifications(fn) {
   }
 }
 
-test("a notification about a new post sends its group to the front", async () => {
+test("a notification about a new post: its group is visited in the same step", async () => {
   await withNotifications(async () => {
     // Both groups were visited 5 minutes ago: without the notification nothing would be due.
     fake.store.monitor.groupLastVisit = { aaa: Date.now() - 5 * 60000, bbb: Date.now() - 5 * 60000 };
     fake.pageResult = {
       status: "ok",
       items: [
-        { key: "n:1", groupId: "bbb" },
-        { key: "n:2", groupId: "not-watched" },
+        { key: "k1", groupId: "bbb" },
+        { key: "k2", groupId: "not-watched" },
       ],
+      posts: [post(5)],
     };
-    await runTick();
-    assert.deepEqual(fake.navigations, [NOTIFICATIONS_URL]);
-    assert.deepEqual(monitor().notifyQueue, ["bbb"]);
-    assert.equal(monitor().notificationsInfo.queued, 1);
-
-    timing.notificationsIntervalMs = 60 * 60 * 1000; // notifications not due on the next tick
-    fake.pageResult = okPage(post(5));
     await runTick();
     assert.deepEqual(visitedPaths(), ["/notifications", "/groups/bbb/"]);
     assert.deepEqual(monitor().notifyQueue, []);
+    assert.equal(monitor().notificationsInfo.queued, 1);
     assert.equal(postRequests().length, 1);
+    assert.ok(fake.alarms.has(ALARM_NAME));
+  });
+});
+
+test("several new posts: up to 3 groups in one step, the rest on the next one", async () => {
+  await withNotifications(async () => {
+    fake.store.settings.groupIds = ["g1", "g2", "g3", "g4"];
+    const recent = Date.now() - 60000;
+    fake.store.monitor.groupLastVisit = { g1: recent, g2: recent, g3: recent, g4: recent };
+    fake.pageResult = {
+      status: "ok",
+      items: ["g1", "g2", "g3", "g4"].map((g) => ({ key: `k-${g}`, groupId: g })),
+      posts: [post(1)],
+    };
+    await runTick();
+    assert.deepEqual(visitedPaths(), ["/notifications", "/groups/g1/", "/groups/g2/", "/groups/g3/"]);
+    assert.deepEqual(monitor().notifyQueue, ["g4"]);
+
+    timing.notificationsIntervalMs = 60 * 60 * 1000; // not due on the next step
+    await runTick();
+    assert.equal(visitedPaths().at(-1), "/groups/g4/");
+    assert.deepEqual(monitor().notifyQueue, []);
   });
 });
 

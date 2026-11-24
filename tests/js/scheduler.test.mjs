@@ -81,3 +81,10 @@ test("notifications queue only watched groups, once per key", () => {
   const capped = queueFromNotifications([{ key: "n:9", groupId: "b" }], ["b"], [], ["k1", "k2"], 2);
   assert.deepEqual(capped.seen, ["k2", "n:9"]);
 });
+
+test("freshly notified groups go to the front of the queue", () => {
+  const result = queueFromNotifications([{ key: "n", groupId: "c" }], ["a", "b", "c"], ["a", "b"], []);
+  assert.deepEqual(result.queue, ["c", "a", "b"]);
+  const again = queueFromNotifications([{ key: "m", groupId: "b" }], ["a", "b", "c"], ["c", "a", "b"], []);
+  assert.deepEqual(again.queue, ["b", "c", "a"]);
+});
