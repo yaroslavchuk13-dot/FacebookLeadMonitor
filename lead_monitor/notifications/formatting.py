@@ -54,7 +54,21 @@ def _posted(lead: dict[str, Any], now: datetime | None) -> str:
     now = now or datetime.now().astimezone()
     if posted_at.tzinfo is None:
         posted_at = posted_at.replace(tzinfo=now.tzinfo)
-    return describe_age(posted_at, now)
+    return describe_age(posted_at, now) + _found_after(lead, posted_at)
+
+
+def _found_after(lead: dict[str, Any], posted_at: datetime) -> str:
+    """" · знайдено через 2 хв": time from publication to saving (Facebook gives minutes only)."""
+    try:
+        saved_at = datetime.fromisoformat(lead["saved_at"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if saved_at.tzinfo is None:
+        saved_at = saved_at.replace(tzinfo=posted_at.tzinfo)
+    minutes = max(0, round((saved_at - posted_at).total_seconds() / 60))
+    if minutes > 24 * 60:
+        return ""  # an old post found by the catch-up round: the delay means nothing
+    return f" · знайдено через {minutes} хв" if minutes else " · знайдено одразу"
 
 
 def format_lead(lead: dict[str, Any], location: list[str] | None = None, now: datetime | None = None) -> str:

@@ -467,3 +467,19 @@ test("checkpoint on the notifications page stops monitoring", async () => {
     assert.equal(alertRequests()[0].body.kind, "checkpoint");
   });
 });
+
+test("a group saved by name learns its numeric id, then notifications find it", async () => {
+  await withNotifications(async () => {
+    timing.notificationsIntervalMs = 60 * 60 * 1000;
+    fake.store.monitor.lastNotificationsCheck = Date.now();
+    fake.store.settings.groupIds = ["firestoppersuk"];
+    fake.pageResult = { ...okPage(post(1)), numericGroupId: "987654321" };
+    await runTick(); // backup round visit by name
+    assert.deepEqual(monitor().groupAliases, { 987654321: "firestoppersuk" });
+
+    timing.notificationsIntervalMs = 0;
+    fake.pageResult = { status: "ok", items: [{ key: "x1", groupId: "987654321" }], posts: [post(2)] };
+    await runTick();
+    assert.deepEqual(visitedPaths().slice(-2), ["/notifications", "/groups/firestoppersuk/"]);
+  });
+});

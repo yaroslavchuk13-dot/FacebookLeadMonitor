@@ -31,15 +31,19 @@ export function pickBackupGroup(
  * New notifications -> groups to visit. Only groups from the settings; keys already seen are
  * skipped. Returns { queue, seen } (seen is capped, newest kept).
  */
-export function queueFromNotifications(items, groupIds, queue, seen, limit = SEEN_NOTIFICATIONS_LIMIT) {
+export function queueFromNotifications(
+  items, groupIds, queue, seen, limit = SEEN_NOTIFICATIONS_LIMIT, aliases = {},
+) {
   const watched = new Set(groupIds ?? []);
   const seenSet = new Set(seen ?? []);
   const fresh = []; // groups with new notifications, newest first (page order)
   const newSeen = [...(seen ?? [])];
-  for (const { key, groupId } of items ?? []) {
+  for (const { key, groupId: notifiedId } of items ?? []) {
     if (seenSet.has(key)) continue;
     seenSet.add(key);
     newSeen.push(key);
+    // Notifications use numeric ids; a group may be saved by its name -> aliases map them.
+    const groupId = aliases?.[notifiedId] ?? notifiedId;
     if (watched.has(groupId) && !fresh.includes(groupId)) fresh.push(groupId);
   }
   // Newest posts first: freshly notified groups go before the ones already waiting.

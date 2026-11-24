@@ -254,9 +254,14 @@ async function onParseNotifications() {
       func: () => globalThis.FLM.parseNotifications(),
     });
     const watched = new Set(currentGroupIds);
+    const aliases = currentMonitor?.groupAliases ?? {};
     const byGroup = new Map();
     for (const item of result.items) byGroup.set(item.groupId, (byGroup.get(item.groupId) ?? 0) + 1);
-    const lines = [...byGroup].map(([id, n]) => `${watched.has(id) ? "✅" : "▫️"} ${id}: ${n}`);
+    const lines = [...byGroup].map(([id, n]) => {
+      const known = watched.has(id) || watched.has(aliases[id]);
+      const name = aliases[id] ? ` (${aliases[id]})` : "";
+      return `${known ? "✅" : "▫️"} ${id}${name}: ${n}`;
+    });
     preview.textContent = [
       `Посилань на групи: ${result.links}, сповіщень про групи: ${result.items.length}`,
       "✅ — група є у вашому списку, ▫️ — ні:",

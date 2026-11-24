@@ -11,6 +11,7 @@ import {
   pickBackupGroup,
   queueFromNotifications,
   randomPauseSec,
+  SEEN_NOTIFICATIONS_LIMIT,
 } from "../lib/scheduler.js";
 import {
   loadMonitor,
@@ -210,6 +211,7 @@ async function checkNotifications(settings, monitor) {
   const items = visit.status === "ok" ? visit.items : [];
   const { queue, seen } = queueFromNotifications(
     items, settings.groupIds, current.notifyQueue, current.seenNotifications,
+    SEEN_NOTIFICATIONS_LIMIT, current.groupAliases,
   );
   const queuedNow = queue.length - (current.notifyQueue ?? []).length;
   await updateMonitor({
@@ -266,10 +268,12 @@ async function visitAndDeliver(settings, monitor, groupId) {
   const failures = { ...monitor.groupFailures };
   const lastVisits = { ...monitor.groupLastVisit };
   const retryAt = { ...monitor.groupRetryAt };
+  const aliases = { ...monitor.groupAliases };
   if (visit.status === "ok") {
     delete failures[groupId];
     delete retryAt[groupId];
     lastVisits[groupId] = Date.now();
+    if (visit.numericGroupId && visit.numericGroupId !== groupId) aliases[visit.numericGroupId] = groupId;
   } else {
     failures[groupId] = (failures[groupId] ?? 0) + 1;
     retryAt[groupId] = Date.now() + timing.failedRetryMs; // not again and again right now
@@ -289,6 +293,7 @@ async function visitAndDeliver(settings, monitor, groupId) {
     groupFailures: failures,
     groupLastVisit: lastVisits,
     groupRetryAt: retryAt,
+    groupAliases: aliases,
     currentVisit: null,
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),

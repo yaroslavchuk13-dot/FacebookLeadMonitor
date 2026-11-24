@@ -88,3 +88,9 @@ test("freshly notified groups go to the front of the queue", () => {
   const again = queueFromNotifications([{ key: "m", groupId: "b" }], ["a", "b", "c"], ["c", "a", "b"], []);
   assert.deepEqual(again.queue, ["b", "c", "a"]);
 });
+
+test("a group saved by its name is matched through the alias", () => {
+  const items = [{ key: "k", groupId: "123456789" }];
+  const result = queueFromNotifications(items, ["firestoppersuk"], [], [], 500, { 123456789: "firestoppersuk" });
+  assert.deepEqual(result.queue, ["firestoppersuk"]);
+});

@@ -12,6 +12,7 @@ export const DEFAULT_MONITOR = {
   groupFailures: {}, // groupId -> consecutive failures (to avoid repeated alerts)
   groupLastVisit: {}, // groupId -> ms of the last successful visit (deep scan after a break)
   groupRetryAt: {}, // groupId -> ms: a failed group is not retried before this time
+  groupAliases: {}, // numeric group id -> group id from the settings (when saved by name)
   notifyQueue: [], // groups with a new post seen in Facebook notifications, visited first
   seenNotifications: [], // keys of notifications already handled
   lastNotificationsCheck: null, // ms

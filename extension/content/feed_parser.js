@@ -37,6 +37,24 @@
     return parts[0] === "groups" && parts[1] ? decodeURIComponent(parts[1]) : null;
   }
 
+  /**
+   * The numeric group id: notifications always use it, while a group link may use a name
+   * ("/groups/firestoppersuk/"). Facebook embeds it in the page data as "groupID":"123…".
+   */
+  function numericGroupId(groupId) {
+    if (/^\d+$/.test(groupId)) return groupId;
+    const html = document.documentElement.innerHTML;
+    const embedded = html.match(/"group(?:ID|_id|Id)"\s*:\s*"(\d{6,})"/);
+    if (embedded) return embedded[1];
+    // Fallback: the most frequent numeric group id among the links of the page.
+    const counts = new Map();
+    for (const a of document.querySelectorAll('a[href*="/groups/"]')) {
+      const id = a.getAttribute("href").match(/\/groups\/(\d{6,})/)?.[1];
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return [...counts].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
+  }
+
   function groupName() {
     const h1 = document.querySelector('[role="main"] h1') ?? document.querySelector("h1");
     return cleanText(h1?.innerText).split("\n")[0] || null;
@@ -317,7 +335,14 @@
     }
     window.scrollTo({ top: 0 });
     // expanded: how many "See original" / "See more" buttons were clicked.
-    return { status: "ok", groupId, groupName: groupName(), posts: [...state.found.values()], expanded: state.expanded };
+    return {
+      status: "ok",
+      groupId,
+      numericGroupId: numericGroupId(groupId),
+      groupName: groupName(),
+      posts: [...state.found.values()],
+      expanded: state.expanded,
+    };
   }
 
   /**

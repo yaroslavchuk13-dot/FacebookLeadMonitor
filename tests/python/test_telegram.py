@@ -250,3 +250,11 @@ def test_lead_message_shows_pay() -> None:
     no_pay = {**LEAD, "text": "Fire stopper required in Moorgate, rate negotiable"}
     assert "💷 <b>Оплата:</b> Оплата не вказана" not in format_lead(no_pay)
     assert "💷 <b>Оплата:</b> не вказана" in format_lead(no_pay)
+
+
+def test_message_shows_how_fast_the_post_was_found() -> None:
+    now = datetime(2026, 11, 24, 19, 10, tzinfo=UTC)
+    lead = {**LEAD, "posted_at": "2026-11-24T19:03:00+00:00", "saved_at": "2026-11-24T19:05:10+00:00"}
+    assert "🕒 <b>7 хв тому (24.11 19:03) · знайдено через 2 хв</b>" in format_lead(lead, now=now)
+    old = {**LEAD, "posted_at": "2026-11-20T10:00:00+00:00", "saved_at": "2026-11-24T19:05:10+00:00"}
+    assert "знайдено" not in format_lead(old, now=now)
