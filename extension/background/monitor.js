@@ -12,6 +12,7 @@ import {
   NOTIFICATIONS_INTERVAL_MS,
   pickBackupGroup,
   pickNextGroup,
+  rememberPosts,
   queueFromNotifications,
   SEEN_NOTIFICATIONS_LIMIT,
 } from "../lib/scheduler.js";
@@ -36,14 +37,14 @@ const NOTIFICATIONS_URL = "https://www.facebook.com/notifications";
 // Waits inside one visit (tests set them to 0).
 export const timing = {
   pageLoadTimeoutMs: 45000,
-  renderWaitMinMs: 2000, // let Facebook render the feed after "load"
-  renderWaitMaxMs: 3500,
+  renderWaitMinMs: 1000, // let Facebook render the feed after "load"
+  renderWaitMaxMs: 2000,
   emptyFeedRetryMs: 3000,
   // Continuous loop: a short pause between visits; every group is checked at least this often.
   pageOverheadMs: 8000, // opening + rendering a group page (subtracted from the catch-up budget)
   minParseBudgetMs: 10000,
-  stepGapMinMs: 2000,
-  stepGapMaxMs: 4000,
+  stepGapMinMs: 1000,
+  stepGapMaxMs: 2000,
   groupTargetMs: GROUP_TARGET_MS,
   pausedPollMs: 30000, // /pause in Telegram: check the pause flag this often
   errorPauseMs: 10000,
@@ -284,8 +285,9 @@ async function visitAndDeliver(settings, monitor, groupId) {
   const budget = deep
     ? Math.max(timing.minParseBudgetMs, catchUpBudgetMs(settings.groupIds.length) - timing.pageOverheadMs)
     : null;
+  const known = monitor.knownPosts?.[groupId] ?? [];
   const visit = await visitGroup(
-    groupId, monitor.tabId, deep ? DEEP_SCROLL_STEPS : NORMAL_SCROLL_STEPS, budget,
+    groupId, monitor.tabId, deep ? DEEP_SCROLL_STEPS : NORMAL_SCROLL_STEPS, budget, known,
   );
 
   monitor = await loadMonitor();
@@ -322,8 +324,13 @@ async function visitAndDeliver(settings, monitor, groupId) {
   }
 
   const delivery = await deliver(settings, visit.posts ?? []);
+  const knownPosts = { ...monitor.knownPosts };
+  if (delivery.sent > 0 || !(visit.posts ?? []).length) {
+    knownPosts[groupId] = rememberPosts(knownPosts[groupId], visit.posts ?? []);
+  }
   await updateMonitor({
     tabId: visit.tabId,
+    knownPosts,
     notifyQueue: queue,
     groupFailures: failures,
     groupLastVisit: lastVisits,
@@ -392,17 +399,17 @@ async function deliver(settings, posts) {
 // --- visiting a group --------------------------------------------------------------
 
 /** Opens the group in the monitor tab and parses it. Returns { status, tabId, posts?, error? }. */
-async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS, timeBudgetMs = null) {
+async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS, timeBudgetMs = null, knownUrls = []) {
   let tab;
   try {
     tab = await ensureTab(tabId);
     await navigateAndWait(tab.id, groupFeedUrl(groupId));
     await sleep(randomBetween(timing.renderWaitMinMs, timing.renderWaitMaxMs));
 
-    let result = await parseTab(tab.id, scrollSteps, timeBudgetMs);
+    let result = await parseTab(tab.id, scrollSteps, timeBudgetMs, knownUrls);
     if (result.status === "ok" && result.posts.length === 0) {
       await sleep(timing.emptyFeedRetryMs); // feed may still be loading
-      result = await parseTab(tab.id, NORMAL_SCROLL_STEPS);
+      result = await parseTab(tab.id, NORMAL_SCROLL_STEPS, null, knownUrls);
     }
     return { ...result, tabId: tab.id };
   } catch (err) {
@@ -492,16 +499,16 @@ function navigateAndWait(tabId, url) {
   });
 }
 
-async function parseTab(tabId, scrollSteps, timeBudgetMs = null) {
+async function parseTab(tabId, scrollSteps, timeBudgetMs = null, knownUrls = []) {
   const target = { tabId };
   await chrome.scripting.executeScript({ target, files: CONTENT_SCRIPTS });
   const [{ result }] = await chrome.scripting.executeScript({
     target,
-    args: [scrollSteps, timeBudgetMs],
-    func: async (steps, budget) => {
+    args: [scrollSteps, timeBudgetMs, knownUrls],
+    func: async (steps, budget, known) => {
       const state = globalThis.FLM.pageState();
       if (state !== "ok") return { status: state, posts: [] };
-      return globalThis.FLM.parseFeed({ scrollSteps: steps, timeBudgetMs: budget ?? undefined });
+      return globalThis.FLM.parseFeed({ scrollSteps: steps, timeBudgetMs: budget ?? undefined, knownUrls: known });
     },
   });
   return result;

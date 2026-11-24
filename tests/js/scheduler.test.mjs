@@ -9,6 +9,7 @@ import {
   needsDeepScan,
   pickBackupGroup,
   pickNextGroup,
+  rememberPosts,
   queueFromNotifications,
   nextGroupIndex,
   PAUSE_MAX_SEC,
@@ -112,4 +113,12 @@ test("catch-up budget: 10 minutes shared by the groups, 20-90 s each", () => {
   assert.equal(catchUpBudgetMs(10), 60_000);
   assert.equal(catchUpBudgetMs(3), 90_000); // capped
   assert.equal(catchUpBudgetMs(60), 20_000); // floor
+});
+
+test("remembered post links: no duplicates, newest last, capped, fallback links skipped", () => {
+  const p = (n, linkFound = true) => ({ post_url: `u${n}`, link_found: linkFound });
+  assert.deepEqual(rememberPosts([], [p(1), p(2)]), ["u1", "u2"]);
+  assert.deepEqual(rememberPosts(["u1", "u2"], [p(1)]), ["u2", "u1"]);
+  assert.deepEqual(rememberPosts(["u1", "u2"], [p(3)], 2), ["u2", "u3"]);
+  assert.deepEqual(rememberPosts([], [p(4, false)]), []);
 });

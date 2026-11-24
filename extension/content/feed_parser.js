@@ -282,13 +282,25 @@
    * Facebook unloads posts far from the screen, so this runs at every scroll step.
    */
   async function collectVisible(feed, groupId, state) {
-    const roots = postElements(feed).filter((root) => !state.done.has(root) && findText(root));
+    let roots = postElements(feed).filter((root) => !state.done.has(root) && findText(root));
+    if (!roots.length) return;
+
+    await revealLazyLinks(roots.filter((root) => !findPostUrl(root, groupId)));
+    // Posts already sent on an earlier visit: skip the slow part (expanding, reading the time).
+    roots = roots.filter((root) => {
+      const url = findPostUrl(root, groupId);
+      if (url && state.known.has(url)) {
+        state.done.add(root);
+        state.skippedKnown += 1;
+        return false;
+      }
+      return true;
+    });
     if (!roots.length) return;
 
     const expanded = await expandPosts(roots);
     state.expanded.originals += expanded.originals;
     state.expanded.seeMore += expanded.seeMore;
-    await revealLazyLinks(roots.filter((root) => !findPostUrl(root, groupId)));
 
     for (const root of roots) {
       const text = findText(root);
@@ -326,7 +338,13 @@
     const feed = document.querySelector(FEED);
     if (!feed) return { status: "no_feed", groupId, groupName: groupName(), posts: [] };
 
-    const state = { found: new Map(), done: new WeakSet(), expanded: { originals: 0, seeMore: 0 } };
+    const state = {
+      found: new Map(),
+      done: new WeakSet(),
+      expanded: { originals: 0, seeMore: 0 },
+      known: new Set(options.knownUrls ?? []), // post links sent on earlier visits
+      skippedKnown: 0,
+    };
     window.scrollTo({ top: 0 });
     for (let step = 0; step <= scrollSteps; step += 1) {
       await collectVisible(feed, groupId, state);
@@ -344,6 +362,7 @@
       groupName: groupName(),
       posts: [...state.found.values()],
       expanded: state.expanded,
+      skippedKnown: state.skippedKnown,
     };
   }
 

@@ -377,7 +377,7 @@ test("first visit after a break scrolls deep, the next one is normal", async () 
   await runTick(); // never visited -> deep
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // backup round, 1 h later
   await runTick(); // -> normal
-  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 2]);
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 1]);
   assert.ok(fake.scriptArgs[0][1] > 0, "deep check has a time budget");
   assert.equal(fake.scriptArgs[1][1], null, "normal check has none");
 
@@ -498,7 +498,7 @@ test("catch-up first (deep, 10 min / groups each), then the overdue groups (fast
   await runTick();
   await runTick();
   assert.deepEqual(visitedPathsAll(), ["/groups/never1/", "/groups/never2/", "/groups/aaa/"]);
-  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 60, 2]);
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [60, 60, 1]);
   // 3 groups -> 10 min / 3 is capped at 90 s per group, minus the page opening time
   assert.equal(fake.scriptArgs[0][1], 90_000 - 8_000);
 });
@@ -506,3 +506,21 @@ test("catch-up first (deep, 10 min / groups each), then the overdue groups (fast
 function visitedPathsAll() {
   return fake.navigations.map((u) => new URL(u).pathname);
 }
+
+test("posts sent once are passed to the parser as known next time", async () => {
+  fake.store.settings.groupIds = ["aaa"];
+  fake.pageResult = { ...okPage(post(1), post(2)) };
+  await runTick();
+  assert.deepEqual(fake.scriptArgs[0][2], []); // first visit: nothing known
+  fake.store.monitor.groupLastVisit.aaa = Date.now() - 200_000;
+  await runTick();
+  assert.deepEqual(fake.scriptArgs[1][2], [post(1).post_url, post(2).post_url]);
+});
+
+test("posts are not remembered while the server is down (they are retried)", async () => {
+  fake.store.settings.groupIds = ["aaa"];
+  fake.serverUp = false;
+  fake.pageResult = okPage(post(1));
+  await runTick();
+  assert.deepEqual(monitor().knownPosts?.aaa ?? [], []);
+});

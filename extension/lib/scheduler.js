@@ -87,9 +87,21 @@ export function queueFromNotifications(
 // Posts waiting to be delivered while the local server is unreachable.
 export const OUTBOX_LIMIT = 500;
 
+// Post links already sent, per group: the parser skips their slow processing next time.
+export const KNOWN_POSTS_PER_GROUP = 150;
+
+/** Adds the links of `posts` to the remembered list (newest last, capped). */
+export function rememberPosts(known, posts, limit = KNOWN_POSTS_PER_GROUP) {
+  const list = (known ?? []).filter((url) => !(posts ?? []).some((p) => p.post_url === url));
+  for (const post of posts ?? []) {
+    if (post.link_found !== false) list.push(post.post_url); // fallback links are not stable keys
+  }
+  return list.slice(-limit);
+}
+
 // How far a group visit scrolls. After a break (night, PC off) the first visit goes deeper
 // so posts published meanwhile are not missed.
-export const NORMAL_SCROLL_STEPS = 2; // ~5-8 newest posts: enough when every group is checked every 2-3 min
+export const NORMAL_SCROLL_STEPS = 1; // the top of the feed: a group gets 1-3 new posts in 2-3 min
 export const DEEP_SCROLL_STEPS = 60; // upper limit; the catch-up time budget usually stops earlier
 export const DEEP_SCAN_AFTER_MS = 3 * 60 * 60 * 1000;
 
