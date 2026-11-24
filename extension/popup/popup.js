@@ -70,7 +70,8 @@ function renderMonitor() {
       lines.push("Відновлюю цикл… (до 1 хв)");
     }
   }
-  if (m.running && m.notificationsInfo) {
+  // Only fresh data: notifications are off by default, an old line would only confuse.
+  if (m.running && m.notificationsInfo && Date.now() - m.notificationsInfo.at < 10 * 60 * 1000) {
     const n = m.notificationsInfo;
     const problem = n.status === "ok" ? "" : ` ⚠ ${n.error ?? n.status}`;
     lines.push(
