@@ -225,7 +225,7 @@ async function onParseProfile() {
     }
     preview.textContent = [
       "Що бачить перевірка на скам:",
-      `Фото профілю: ${yesNo(p.has_photo)}`,
+      `Фото профілю: ${yesNo(p.has_photo)} (тип зображення: ${p.avatar_kind ?? "?"})`,
       `Друзів: ${p.friends ?? "невідомо"}`,
       `Підписників: ${p.followers ?? "невідомо"}`,
       `Рік реєстрації: ${p.joined_year ?? "невідомо"}`,

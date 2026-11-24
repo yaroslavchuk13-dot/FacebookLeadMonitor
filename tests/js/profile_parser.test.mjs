@@ -79,3 +79,9 @@ test("new layout: 'Personal details' and 'Education' (real profile from 24.11.20
   assert.equal(s.intro_items, 3);
   assert.equal(s.has_photo, true);
 });
+
+test("Facebook's grey default avatar is not a real photo", () => {
+  const defaultAvatar =
+    "https://scontent-lhr6-1.xx.fbcdn.net/v/t1.30497-1/453178253_471506465671661_2781666950760530985_n.png?stp=dst-png_s200x200&_nc_cat=1";
+  assert.equal(extractProfileSignals("Тьома Крутой\nGroup posts", defaultAvatar).has_photo, false);
+});

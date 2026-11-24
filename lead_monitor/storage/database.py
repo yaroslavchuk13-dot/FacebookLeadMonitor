@@ -77,6 +77,10 @@ MIGRATIONS: list[str] = [
     """
     DELETE FROM author_profiles;
     """,
+    # 5: Facebook's default avatar was counted as a real photo — re-check cached authors.
+    """
+    DELETE FROM author_profiles;
+    """,
 ]
 
 # Columns returned for a lead (Telegram notifier, statistics).

@@ -32,6 +32,8 @@
   function hasRealPhoto(avatarHref) {
     if (!avatarHref) return null;
     if (/rsrc\.php|\/static\.|default|silhouette/i.test(avatarHref)) return false;
+    // Facebook's grey default avatar is served from scontent too, with this asset type.
+    if (/\/t1\.30497-1\//.test(avatarHref)) return false;
     if (/scontent|fbcdn\.net\/v\//i.test(avatarHref)) return true;
     return null;
   }
@@ -73,7 +75,11 @@
 
   function parseProfile() {
     const main = document.querySelector('[role="main"]') ?? document.body;
-    return extractProfileSignals(main.innerText, findAvatarHref(main));
+    const avatarHref = findAvatarHref(main);
+    const signals = extractProfileSignals(main.innerText, avatarHref);
+    // For the popup test only: the image asset type ("t39.30808-1" photo, "t1.30497-1" default).
+    signals.avatar_kind = avatarHref ? (avatarHref.match(/\/v\/(t[\d.-]+)\//)?.[1] ?? "other") : "not found";
+    return signals;
   }
 
   globalThis.FLM = Object.assign(globalThis.FLM ?? {}, { extractProfileSignals, parseProfile });
