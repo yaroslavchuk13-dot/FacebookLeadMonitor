@@ -1,12 +1,15 @@
-// Monitor loop: visits one group per tick, sends new posts, then schedules the next tick.
+// Monitor loop: Facebook notifications -> groups with new posts -> server; hourly backup round.
 // Stops completely on a checkpoint / login page — no attempts to bypass it.
 import { groupFeedUrl } from "../lib/groups.js";
 import {
   addToOutbox,
+  BACKUP_VISIT_MS,
   DEEP_SCROLL_STEPS,
   needsDeepScan,
-  nextGroupIndex,
   NORMAL_SCROLL_STEPS,
+  NOTIFICATIONS_INTERVAL_MS,
+  pickBackupGroup,
+  queueFromNotifications,
   randomPauseSec,
 } from "../lib/scheduler.js";
 import {
@@ -25,12 +28,17 @@ const WATCHDOG_PERIOD_MIN = 1;
 
 const CONTENT_SCRIPTS = ["content/post_links.js", "content/page_state.js", "content/feed_parser.js"];
 const PROFILE_SCRIPTS = ["content/page_state.js", "content/profile_parser.js"];
+const NOTIFICATIONS_SCRIPTS = ["content/page_state.js", "content/notifications_parser.js"];
+const NOTIFICATIONS_URL = "https://www.facebook.com/notifications";
 // Waits inside one visit (tests set them to 0).
 export const timing = {
   pageLoadTimeoutMs: 45000,
   renderWaitMinMs: 4000, // let Facebook render the feed after "load"
   renderWaitMaxMs: 7000,
   emptyFeedRetryMs: 5000,
+  notificationsIntervalMs: NOTIFICATIONS_INTERVAL_MS,
+  backupVisitMs: BACKUP_VISIT_MS,
+  failedRetryMs: 10 * 60 * 1000,
 };
 const STOP_STATES = new Set(["checkpoint", "login_required"]);
 
@@ -126,8 +134,15 @@ export async function resumeIfRunning() {
 
 // --- one tick ------------------------------------------------------------------------
 
+/**
+ * One step of the loop. Priorities:
+ *   1. Facebook notifications (every 90 s) -> groups with a new post go to the queue
+ *   2. a queued group (new post) — visited right away
+ *   3. author profile for the scam check
+ *   4. backup round: a group not visited for an hour (or never / after a break: deep)
+ */
 async function tick() {
-  let monitor = await loadMonitor();
+  const monitor = await loadMonitor();
   if (!monitor.running) return;
   const settings = await loadSettings();
   if (!settings.groupIds.length) {
@@ -142,14 +157,71 @@ async function tick() {
     await scheduleNext();
     return;
   }
+
+  const now = Date.now();
+  if (now - (monitor.lastNotificationsCheck ?? 0) >= timing.notificationsIntervalMs) {
+    await checkNotifications(settings, monitor);
+    return;
+  }
+  const queued = (monitor.notifyQueue ?? []).find((id) => settings.groupIds.includes(id));
+  if (queued) {
+    await visitAndDeliver(settings, monitor, queued);
+    return;
+  }
   if (control.profileCheck) {
-    // A new lead waits for the author scam check: this cycle opens the profile instead of a group.
+    // A new lead waits for the author scam check.
     await checkProfile(settings, monitor, control.profileCheck);
     return;
   }
+  const backup = pickBackupGroup(
+    settings.groupIds, monitor.groupLastVisit, now, timing.backupVisitMs, monitor.groupRetryAt,
+  );
+  if (backup) {
+    await visitAndDeliver(settings, monitor, backup);
+    return;
+  }
+  await scheduleNext(); // nothing to do now: wait for the next notifications check
+}
 
-  const index = nextGroupIndex(settings.groupIds.length, monitor.lastIndex);
-  const groupId = settings.groupIds[index];
+/** Opens facebook.com/notifications and queues groups that got new posts. */
+async function checkNotifications(settings, monitor) {
+  await updateMonitor({ currentVisit: { groupId: "сповіщення Facebook", startedAt: Date.now() }, nextRunAt: null });
+  const visit = await visitNotifications(monitor.tabId);
+  const current = await loadMonitor();
+  if (!current.running) return;
+
+  if (STOP_STATES.has(visit.status)) {
+    const alert = { kind: visit.status, message: STOP_MESSAGES[visit.status], at: Date.now() };
+    await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastNotificationsCheck: Date.now() });
+    await sendAlert(settings, { kind: alert.kind, message: alert.message, stopped: true });
+    await stopMonitor(alert);
+    return;
+  }
+
+  const items = visit.status === "ok" ? visit.items : [];
+  const { queue, seen } = queueFromNotifications(
+    items, settings.groupIds, current.notifyQueue, current.seenNotifications,
+  );
+  const queuedNow = queue.length - (current.notifyQueue ?? []).length;
+  await updateMonitor({
+    tabId: visit.tabId,
+    currentVisit: null,
+    lastNotificationsCheck: Date.now(),
+    notifyQueue: queue,
+    seenNotifications: seen,
+    notificationsInfo: {
+      at: Date.now(),
+      status: visit.status,
+      found: items.length,
+      queued: queuedNow,
+      error: visit.error ?? null,
+    },
+  });
+  await scheduleNext();
+}
+
+/** Visits one group, sends its posts to the server, updates the state. */
+async function visitAndDeliver(settings, monitor, groupId) {
   // After a break (night, PC off) the first visit scrolls deeper to catch up.
   const deep = needsDeepScan(monitor.groupLastVisit?.[groupId]);
   await updateMonitor({ currentVisit: { groupId, startedAt: Date.now(), deep }, nextRunAt: null });
@@ -157,15 +229,11 @@ async function tick() {
 
   monitor = await loadMonitor();
   if (!monitor.running) return; // stopped by the user while we were visiting
+  const queue = (monitor.notifyQueue ?? []).filter((id) => id !== groupId);
 
   if (STOP_STATES.has(visit.status)) {
     const alert = { kind: visit.status, message: STOP_MESSAGES[visit.status], at: Date.now() };
-    await updateMonitor({
-      tabId: visit.tabId,
-      lastIndex: index,
-      currentVisit: null,
-      lastRun: runInfo(groupId, visit),
-    });
+    await updateMonitor({ tabId: visit.tabId, currentVisit: null, lastRun: runInfo(groupId, visit) });
     await sendAlert(settings, { kind: alert.kind, message: alert.message, group_id: groupId, stopped: true });
     await stopMonitor(alert);
     return;
@@ -173,11 +241,14 @@ async function tick() {
 
   const failures = { ...monitor.groupFailures };
   const lastVisits = { ...monitor.groupLastVisit };
+  const retryAt = { ...monitor.groupRetryAt };
   if (visit.status === "ok") {
     delete failures[groupId];
+    delete retryAt[groupId];
     lastVisits[groupId] = Date.now();
   } else {
     failures[groupId] = (failures[groupId] ?? 0) + 1;
+    retryAt[groupId] = Date.now() + timing.failedRetryMs; // not again and again right now
     if (failures[groupId] === 1) {
       // Alert only on the first failure in a row, not on every cycle.
       const message = visit.status === "no_feed"
@@ -190,9 +261,10 @@ async function tick() {
   const delivery = await deliver(settings, visit.posts ?? []);
   await updateMonitor({
     tabId: visit.tabId,
-    lastIndex: index,
+    notifyQueue: queue,
     groupFailures: failures,
     groupLastVisit: lastVisits,
+    groupRetryAt: retryAt,
     currentVisit: null,
     postsSent: monitor.postsSent + delivery.sent,
     lastRun: runInfo(groupId, visit, delivery),
@@ -280,6 +352,29 @@ async function visitGroup(groupId, tabId, scrollSteps = NORMAL_SCROLL_STEPS) {
     return { ...result, tabId: tab.id };
   } catch (err) {
     return { status: "error", error: err.message, tabId: tab?.id ?? null };
+  }
+}
+
+/** Opens the notifications page. Returns { status, tabId, items?, error? }. */
+async function visitNotifications(tabId) {
+  let tab;
+  try {
+    tab = await ensureTab(tabId);
+    await navigateAndWait(tab.id, NOTIFICATIONS_URL);
+    await sleep(randomBetween(timing.renderWaitMinMs, timing.renderWaitMaxMs));
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: NOTIFICATIONS_SCRIPTS });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target,
+      func: () => {
+        const state = globalThis.FLM.pageState();
+        if (state !== "ok") return { status: state, items: [] };
+        return globalThis.FLM.parseNotifications();
+      },
+    });
+    return { ...result, tabId: tab.id };
+  } catch (err) {
+    return { status: "error", error: err.message, items: [], tabId: tab?.id ?? null };
   }
 }
 

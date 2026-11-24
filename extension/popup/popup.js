@@ -30,8 +30,7 @@ const formatTime = (ms) => new Date(ms).toLocaleTimeString("uk-UA");
 let currentMonitor = null;
 let outboxSize = 0;
 let currentGroupIds = [];
-// Rough time of one group visit incl. the pause before the next one.
-const NORMAL_VISIT_SEC = 75;
+// Rough time of a deep group visit incl. the pause before the next one.
 const DEEP_VISIT_SEC = 110;
 
 function renderMonitor() {
@@ -55,9 +54,12 @@ function renderMonitor() {
   if (m.running) {
     if (m.currentVisit) {
       const sec = Math.round((Date.now() - m.currentVisit.startedAt) / 1000);
-      const what = m.currentVisit.groupId === "профіль автора"
-        ? "профіль автора (перевірка на скам)"
-        : `групу ${m.currentVisit.groupId}${m.currentVisit.deep ? " (глибоко, після перерви)" : ""}`;
+      const special = {
+        "профіль автора": "профіль автора (перевірка на скам)",
+        "сповіщення Facebook": "сповіщення Facebook",
+      };
+      const what = special[m.currentVisit.groupId]
+        ?? `групу ${m.currentVisit.groupId}${m.currentVisit.deep ? " (глибоко, після перерви)" : ""}`;
       lines.push(`⏳ Перевіряю ${what}… (${sec} с)`);
     } else if (m.nextRunAt) {
       const sec = Math.max(0, Math.round((m.nextRunAt - Date.now()) / 1000));
@@ -66,14 +68,21 @@ function renderMonitor() {
       lines.push("Відновлюю цикл… (до 1 хв)");
     }
   }
+  if (m.running && m.notificationsInfo) {
+    const n = m.notificationsInfo;
+    const problem = n.status === "ok" ? "" : ` ⚠ ${n.error ?? n.status}`;
+    lines.push(
+      `🔔 Сповіщення: о ${formatTime(n.at)}, груп у сповіщеннях: ${n.found}, ` +
+        `нових: ${n.queued}, у черзі: ${(m.notifyQueue ?? []).length}${problem}`,
+    );
+  }
   if (m.running && currentGroupIds.length) {
     const { done, total } = catchUpProgress(currentGroupIds, m.groupLastVisit);
     if (done < total) {
       const minutes = Math.ceil(((total - done) * DEEP_VISIT_SEC) / 60);
       lines.push(`🔄 Наздоганяю пропущене: ${done} з ${total} груп (≈ ${minutes} хв)`);
     } else {
-      const cycle = Math.ceil((total * NORMAL_VISIT_SEC) / 60);
-      lines.push(`✅ Усі групи наздогнано. Коло: ≈ ${cycle} хв`);
+      lines.push("✅ Усі групи наздогнано. Нові дописи — через сповіщення, запасна перевірка щогодини");
     }
   }
   lines.push(`Усього надіслано: ${m.postsSent}`);
@@ -229,6 +238,35 @@ async function onParseProfile() {
   }
 }
 
+/** Shows which watched groups appear on the open facebook.com/notifications page. */
+async function onParseNotifications() {
+  const preview = $("preview");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !tab.url.startsWith("https://www.facebook.com/notifications")) {
+    preview.textContent = "Відкрийте https://www.facebook.com/notifications і натисніть ще раз.";
+    return;
+  }
+  try {
+    const target = { tabId: tab.id };
+    await chrome.scripting.executeScript({ target, files: ["content/notifications_parser.js"] });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target,
+      func: () => globalThis.FLM.parseNotifications(),
+    });
+    const watched = new Set(currentGroupIds);
+    const byGroup = new Map();
+    for (const item of result.items) byGroup.set(item.groupId, (byGroup.get(item.groupId) ?? 0) + 1);
+    const lines = [...byGroup].map(([id, n]) => `${watched.has(id) ? "✅" : "▫️"} ${id}: ${n}`);
+    preview.textContent = [
+      `Посилань на групи: ${result.links}, сповіщень про групи: ${result.items.length}`,
+      "✅ — група є у вашому списку, ▫️ — ні:",
+      ...(lines.length ? lines : ["(жодного — увімкніть у групах Notifications → All posts)"]),
+    ].join("\n");
+  } catch (err) {
+    preview.textContent = `Помилка: ${err.message}`;
+  }
+}
+
 /** Copies a structure-only report of the open group page (no names / post text). */
 async function onDiagnoseTab() {
   const preview = $("preview");
@@ -267,6 +305,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("parse-tab").addEventListener("click", onParseTab);
   $("diagnose-tab").addEventListener("click", onDiagnoseTab);
   $("parse-profile").addEventListener("click", onParseProfile);
+  $("parse-notifications").addEventListener("click", onParseNotifications);
 
   await refreshMonitor();
   chrome.storage.onChanged.addListener((changes, area) => {

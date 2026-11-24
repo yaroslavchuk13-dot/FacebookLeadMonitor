@@ -11,6 +11,11 @@ export const DEFAULT_MONITOR = {
   postsSent: 0,
   groupFailures: {}, // groupId -> consecutive failures (to avoid repeated alerts)
   groupLastVisit: {}, // groupId -> ms of the last successful visit (deep scan after a break)
+  groupRetryAt: {}, // groupId -> ms: a failed group is not retried before this time
+  notifyQueue: [], // groups with a new post seen in Facebook notifications, visited first
+  seenNotifications: [], // keys of notifications already handled
+  lastNotificationsCheck: null, // ms
+  notificationsInfo: null, // { at, found, queued, status } for the popup
   alert: null, // { kind, message, at } — shown in the popup until the next start
 };
 

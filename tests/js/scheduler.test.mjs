@@ -6,6 +6,8 @@ import {
   addToOutbox,
   catchUpProgress,
   needsDeepScan,
+  pickBackupGroup,
+  queueFromNotifications,
   nextGroupIndex,
   PAUSE_MAX_SEC,
   PAUSE_MIN_SEC,
@@ -13,13 +15,13 @@ import {
 } from "../../extension/lib/scheduler.js";
 import "../../extension/content/page_state.js"; // classic script: fills globalThis.FLM
 
-test("pause stays within 45..60 seconds", () => {
+test("pause stays within 30..40 seconds", () => {
   assert.equal(randomPauseSec(() => 0), PAUSE_MIN_SEC);
   assert.equal(randomPauseSec(() => 0.9999999), PAUSE_MAX_SEC);
   assert.equal(randomPauseSec(() => 1), PAUSE_MAX_SEC); // defensive
   for (let i = 0; i < 1000; i += 1) {
     const sec = randomPauseSec();
-    assert.ok(Number.isInteger(sec) && sec >= 45 && sec <= 60, String(sec));
+    assert.ok(Number.isInteger(sec) && sec >= 30 && sec <= 40, String(sec));
   }
 });
 
@@ -58,4 +60,24 @@ test("deep scan after a break of more than 3 hours", () => {
   const visits = { a: now - 1000, b: now - 10 * 60 * 60 * 1000 };
   assert.deepEqual(catchUpProgress(["a", "b", "c"], visits, now), { done: 1, total: 3 });
   assert.deepEqual(catchUpProgress([], undefined, now), { done: 0, total: 0 });
+});
+
+test("backup round: never visited first, then the oldest after an hour, failed ones wait", () => {
+  const now = Date.UTC(2026, 10, 25, 12, 0);
+  const hour = 60 * 60 * 1000;
+  assert.equal(pickBackupGroup(["a", "b"], {}, now), "a");
+  assert.equal(pickBackupGroup(["a", "b"], { a: now }, now), "b");
+  assert.equal(pickBackupGroup(["a", "b"], { a: now, b: now - 5000 }, now), null);
+  assert.equal(pickBackupGroup(["a", "b"], { a: now - 2 * hour, b: now - 3 * hour }, now), "b");
+  assert.equal(pickBackupGroup(["a"], {}, now, hour, { a: now + 1000 }), null);
+});
+
+test("notifications queue only watched groups, once per key", () => {
+  const items = [{ key: "n:1", groupId: "a" }, { key: "n:2", groupId: "x" }, { key: "n:3", groupId: "a" }];
+  const first = queueFromNotifications(items, ["a", "b"], [], []);
+  assert.deepEqual(first, { queue: ["a"], seen: ["n:1", "n:2", "n:3"] });
+  const again = queueFromNotifications(items, ["a", "b"], [], first.seen);
+  assert.deepEqual(again.queue, []);
+  const capped = queueFromNotifications([{ key: "n:9", groupId: "b" }], ["b"], [], ["k1", "k2"], 2);
+  assert.deepEqual(capped.seen, ["k2", "n:9"]);
 });

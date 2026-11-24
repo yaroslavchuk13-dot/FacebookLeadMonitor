@@ -96,7 +96,13 @@ const {
 } = await import(
   "../../extension/background/monitor.js"
 );
-Object.assign(timing, { renderWaitMinMs: 0, renderWaitMaxMs: 0, emptyFeedRetryMs: 0 });
+// Notifications are switched off by default in these tests (see the notifications tests below).
+Object.assign(timing, {
+  renderWaitMinMs: 0,
+  renderWaitMaxMs: 0,
+  emptyFeedRetryMs: 0,
+  notificationsIntervalMs: Number.POSITIVE_INFINITY,
+});
 
 // --- helpers ---------------------------------------------------------------------------
 
@@ -148,22 +154,23 @@ test("a tick visits the group, sends posts and schedules the next visit", async 
   assert.equal(postRequests()[0].body.posts.length, 2);
   assert.equal(monitor().postsSent, 2);
   assert.equal(monitor().lastRun.status, "ok");
-  assert.equal(monitor().lastIndex, 0);
 
   const alarm = fake.alarms.get(ALARM_NAME);
-  assert.ok(alarm.delayInMinutes >= 0.75 && alarm.delayInMinutes <= 1, String(alarm.delayInMinutes));
+  assert.ok(alarm.delayInMinutes >= 0.5 && alarm.delayInMinutes <= 40 / 60, String(alarm.delayInMinutes));
   assert.ok(monitor().nextRunAt > Date.now());
 });
 
-test("groups are visited in turn and the same tab is reused", async () => {
+test("each group once, then the backup round waits an hour; the same tab is reused", async () => {
   await runTick();
   await runTick();
-  await runTick();
-  assert.deepEqual(
-    fake.navigations.map((u) => new URL(u).pathname),
-    ["/groups/aaa/", "/groups/bbb/", "/groups/aaa/"],
-  );
+  await runTick(); // both visited a moment ago -> nothing to do
+  assert.deepEqual(fake.navigations.map((u) => new URL(u).pathname), ["/groups/aaa/", "/groups/bbb/"]);
   assert.equal(fake.tabs.size, 1);
+  assert.ok(fake.alarms.has(ALARM_NAME), "next check is scheduled while idle");
+
+  fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // an hour later
+  await runTick();
+  assert.equal(new URL(fake.navigations.at(-1)).pathname, "/groups/aaa/");
 });
 
 test("a closed monitor tab is reopened", async () => {
@@ -207,20 +214,25 @@ for (const kind of ["checkpoint", "login_required"]) {
   });
 }
 
-test("a broken group alerts once, not on every cycle, and the loop continues", async () => {
+test("a broken group alerts once, waits before a retry, and the loop continues", async () => {
   fake.store.settings.groupIds = ["aaa"];
   fake.pageResult = { status: "no_feed", posts: [] };
   await runTick();
-  await runTick();
+  await runTick(); // retry not before 10 min -> idle
+  assert.equal(fake.navigations.length, 1);
   assert.equal(alertRequests().length, 1);
   assert.equal(alertRequests()[0].body.kind, "no_feed");
   assert.equal(monitor().running, true);
 
-  fake.pageResult = okPage();
+  fake.store.monitor.groupRetryAt.aaa = Date.now() - 1; // 10 min later
+  await runTick(); // broken again, but no repeated alert
+  assert.equal(alertRequests().length, 1);
+
+  fake.store.monitor.groupRetryAt.aaa = Date.now() - 1;
+  fake.pageResult = okPage(post(1));
   await runTick(); // recovered
-  fake.pageResult = { status: "no_feed", posts: [] };
-  await runTick(); // broken again -> new alert
-  assert.equal(alertRequests().length, 2);
+  assert.equal(monitor().groupFailures.aaa, undefined);
+  assert.equal(fake.navigations.length, 3);
 });
 
 test("stop clears the alarm and nothing runs afterwards", async () => {
@@ -357,9 +369,9 @@ test("first visit after a break scrolls deep, the next one is normal", async () 
   fake.store.settings.groupIds = ["aaa"];
   fake.pageResult = okPage(post(1)); // non-empty feed: no "empty feed" retry
   await runTick(); // never visited -> deep
-  await runTick(); // visited a moment ago -> normal
+  fake.store.monitor.groupLastVisit.aaa = Date.now() - 61 * 60 * 1000; // backup round, 1 h later
+  await runTick(); // -> normal
   assert.deepEqual(fake.scriptArgs, [[25], [6]]);
-  assert.ok(monitor().groupLastVisit.aaa > Date.now() - 5000);
 
   fake.store.monitor.groupLastVisit.aaa = Date.now() - 4 * 60 * 60 * 1000; // 4 h break
   await runTick();
@@ -370,7 +382,69 @@ test("a failed visit is retried deep next time", async () => {
   fake.store.settings.groupIds = ["aaa"];
   fake.pageResult = { status: "no_feed", posts: [] };
   await runTick();
+  fake.store.monitor.groupRetryAt.aaa = Date.now() - 1;
   fake.pageResult = okPage(post(1));
   await runTick();
-  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [25, 25]);
+  assert.deepEqual(fake.scriptArgs.map((a) => a[0]), [25, 25]); // never succeeded -> deep again
+});
+
+// --- Facebook notifications ------------------------------------------------------------------
+
+const NOTIFICATIONS_URL = "https://www.facebook.com/notifications";
+const visitedPaths = () => fake.navigations.map((u) => new URL(u).pathname);
+
+async function withNotifications(fn) {
+  timing.notificationsIntervalMs = 0; // due on every tick, unless checked just now
+  try {
+    await fn();
+  } finally {
+    timing.notificationsIntervalMs = Number.POSITIVE_INFINITY;
+  }
+}
+
+test("a notification about a new post sends its group to the front", async () => {
+  await withNotifications(async () => {
+    // Both groups were visited 5 minutes ago: without the notification nothing would be due.
+    fake.store.monitor.groupLastVisit = { aaa: Date.now() - 5 * 60000, bbb: Date.now() - 5 * 60000 };
+    fake.pageResult = {
+      status: "ok",
+      items: [
+        { key: "n:1", groupId: "bbb" },
+        { key: "n:2", groupId: "not-watched" },
+      ],
+    };
+    await runTick();
+    assert.deepEqual(fake.navigations, [NOTIFICATIONS_URL]);
+    assert.deepEqual(monitor().notifyQueue, ["bbb"]);
+    assert.equal(monitor().notificationsInfo.queued, 1);
+
+    timing.notificationsIntervalMs = 60 * 60 * 1000; // notifications not due on the next tick
+    fake.pageResult = okPage(post(5));
+    await runTick();
+    assert.deepEqual(visitedPaths(), ["/notifications", "/groups/bbb/"]);
+    assert.deepEqual(monitor().notifyQueue, []);
+    assert.equal(postRequests().length, 1);
+  });
+});
+
+test("the same notification is not handled twice", async () => {
+  await withNotifications(async () => {
+    fake.store.monitor.groupLastVisit = { aaa: Date.now(), bbb: Date.now() };
+    fake.pageResult = { status: "ok", items: [{ key: "n:1", groupId: "aaa" }] };
+    await runTick();
+    fake.store.monitor.notifyQueue = []; // pretend the group was visited
+    fake.store.monitor.lastNotificationsCheck = 0;
+    await runTick(); // same key again
+    assert.deepEqual(monitor().notifyQueue, []);
+    assert.deepEqual(monitor().seenNotifications, ["n:1"]);
+  });
+});
+
+test("checkpoint on the notifications page stops monitoring", async () => {
+  await withNotifications(async () => {
+    fake.pageResult = { status: "checkpoint", items: [] };
+    await runTick();
+    assert.equal(monitor().running, false);
+    assert.equal(alertRequests()[0].body.kind, "checkpoint");
+  });
 });
